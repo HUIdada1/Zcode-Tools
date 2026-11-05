@@ -48,7 +48,7 @@ python "<skill目录>/scripts/doctor.py" --where  # 只查「插件装在哪」+
 
 补丁会随 ZCode 升级失效或过时，先确认目标版本，再决定打哪个：
 
-| 补丁 | 3.11.2 及更早 | 3.14.x ~ 3.15.x（实测 3.14.1 / 3.14.3 / 3.15.1） |
+| 补丁 | 3.11.2 及更早 | 3.14.x ~ 3.17.x（实测 3.14.1 / 3.14.3 / 3.15.1 / 3.17.2） |
 |---|---|---|
 | ① 思考档位透传（内核补丁） | 需要，走 `providerOptionsByLevel` 兜底 | **已过时**：内核机制整体重写（`providerOptionsByLevel` 只剩 schema 定义，`variants/defaultVariant` 已从内核消失），锚点与结构提取都失效。脚本会提示「原生档位机制，本补丁不适用」 |
 | ①′ 档位配置 `--reasoning-config` | 不需要（用 ①） | **需要**：把档位写进 `provider_config.json` 的 `providerModelRules[].config.optionSpecs.reasoningLevel`（`values` = 界面档位、末位即默认；`map` = CEL，内核发请求前求值并合并进请求体；支持 `maxOutputTokens`）。无需内核补丁 |
