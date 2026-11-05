@@ -909,7 +909,10 @@
 [data-zpilot-settings-panel] .zps-head{
   display:flex;align-items:flex-start;justify-content:space-between;gap:16px;
   padding:18px 84px 14px 28px;border-bottom:1px solid var(--zps-border);flex:0 0 auto;
+  -webkit-app-region:drag;
 }
+[data-zpilot-settings-panel] .zps-close{-webkit-app-region:no-drag}
+[data-zpilot-settings-panel] .zps-body,[data-zpilot-settings-panel] .zps-foot{-webkit-app-region:no-drag}
 [data-zpilot-settings-panel] .zps-title{font-size:16px;font-weight:600;letter-spacing:.01em}
 [data-zpilot-settings-panel] .zps-subtitle{margin-top:3px;color:var(--zps-muted);font-size:12px}
 [data-zpilot-settings-panel] .zps-close{
