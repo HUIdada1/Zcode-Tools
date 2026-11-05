@@ -198,7 +198,13 @@
     // ★ 以 DOM 当前会话为准：切换到已有对话时不一定有新事件，事件流的
     //   currentSessionId 可能仍是上一个会话；按会话开关必须跟着用户眼前的对话走。
     const fromDom = safe(() => {
-      const f = document.querySelector("[data-workspace-conversation-frame]");
+      // 分屏时可能有多个 conversation-frame：优先取当前可见 composer 所属的那个。
+      let f = null;
+      const trigger = findChatModeTrigger().el;
+      if (trigger && typeof trigger.closest === "function") {
+        f = trigger.closest("[data-workspace-conversation-frame]");
+      }
+      if (!f) f = document.querySelector("[data-workspace-conversation-frame]");
       if (!f) return null;
       let sid = f.getAttribute("data-session-id");
       if (!sid) {
@@ -976,42 +982,6 @@
   }
 
   function buildSettingsNavItem(nav) {
-    const existing = nav.querySelector("[data-zpilot-settings-nav]");
-    if (existing && existing.isConnected) return existing;
-
-    const sample = nav.querySelector("[data-settings-section-nav]");
-    const item = sample ? sample.cloneNode(true) : document.createElement("button");
-    item.setAttribute("data-zpilot-settings-nav", "1");
-    item.setAttribute("data-settings-section-nav", "pilot");
-    item.setAttribute("data-testid", "settings-section-nav-pilot");
-    item.setAttribute("type", "button");
-    item.setAttribute("aria-label", "ZCode Pilot");
-    item.setAttribute("title", "ZCode Pilot");
-    item.removeAttribute("aria-current");
-    item.dataset.active = settingsUiActive ? "1" : "0";
-
-    if (!sample) {
-      item.className = "flex h-8 w-full items-center gap-2 rounded-xl px-2.5 text-left transition-colors " +
-        "text-remote-foreground-muted hover:bg-surface-hover hover:text-foreground " +
-        "max-lg:mx-auto max-lg:size-10 max-lg:justify-center max-lg:px-0";
-      item.innerHTML =
-        '<span class="flex size-4 shrink-0 items-center justify-center text-current">' + SETTINGS_ICON + '</span>' +
-        '<span class="min-w-0 flex-1 max-lg:sr-only"><span class="truncate text-ui-base text-foreground">ZCode Pilot</span></span>';
-    } else {
-      item.classList.remove("bg-surface-hover", "text-foreground");
-      item.classList.add("text-remote-foreground-muted");
-      const label = item.querySelector("span.truncate") || item.querySelector("span.text-ui-base");
-      if (label) label.textContent = "ZCode Pilot";
-      const icon = item.querySelector("span.flex.size-4");
-      if (icon) icon.innerHTML = SETTINGS_ICON;
-    }
-
-    item.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      activateSettings();
-    }, true);
-
     const navRoot = nav.querySelector(":scope > div") || nav;
     let group = navRoot.querySelector("[data-zpilot-settings-group]");
     if (!group) {
@@ -1026,6 +996,49 @@
       group.appendChild(heading);
       navRoot.appendChild(group);
     }
+
+    const existing = nav.querySelector("[data-zpilot-settings-nav]");
+    if (existing && existing.isConnected) {
+      if (existing.parentElement !== group) group.appendChild(existing);
+      return existing;
+    }
+
+    const sample = nav.querySelector("[data-settings-section-nav]");
+    const item = sample ? sample.cloneNode(true) : document.createElement("button");
+    item.setAttribute("data-zpilot-settings-nav", "1");
+    item.setAttribute("data-settings-section-nav", "pilot");
+    item.setAttribute("data-testid", "settings-section-nav-pilot");
+    item.setAttribute("type", "button");
+    item.setAttribute("aria-label", "ZCode 工具箱");
+    item.setAttribute("title", "ZCode Pilot · 自动继续");
+    item.removeAttribute("aria-current");
+    item.removeAttribute("disabled");
+    item.removeAttribute("aria-disabled");
+    item.disabled = false;
+    item.dataset.active = settingsUiActive ? "1" : "0";
+
+    if (!sample) {
+      item.className = "flex h-8 w-full items-center gap-2 rounded-xl px-2.5 text-left transition-colors " +
+        "text-remote-foreground-muted hover:bg-surface-hover hover:text-foreground " +
+        "max-lg:mx-auto max-lg:size-10 max-lg:justify-center max-lg:px-0";
+      item.innerHTML =
+        '<span class="flex size-4 shrink-0 items-center justify-center text-current">' + SETTINGS_ICON + '</span>' +
+        '<span class="min-w-0 flex-1 max-lg:sr-only"><span class="truncate text-ui-base text-foreground">ZCode 工具箱</span></span>';
+    } else {
+      item.classList.remove("bg-surface-hover", "text-foreground");
+      item.classList.add("text-remote-foreground-muted");
+      const label = item.querySelector("span.truncate") || item.querySelector("span.text-ui-base");
+      if (label) label.textContent = "ZCode 工具箱";
+      const icon = item.querySelector("span.flex.size-4");
+      if (icon) icon.innerHTML = SETTINGS_ICON;
+    }
+
+    item.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      activateSettings();
+    }, true);
+
     group.appendChild(item);
     return item;
   }
@@ -1136,9 +1149,9 @@
       escHtml(title) + "</div>" + keys.map((k) => settingsRowHtml(SETTINGS_FIELD_BY_KEY[k])).join("") +
       "</div>";
     panel.innerHTML =
-      '<div class="zps-head"><div><div class="zps-title">ZCode Pilot</div>' +
-      '<div class="zps-subtitle">自动继续 · 输入框开关只影响当前会话；这里配置默认策略。</div></div>' +
-      '<button class="zps-close" data-zps-action="close" aria-label="关闭">×</button></div>' +
+      '<div class="zps-head"><div><div class="zps-title">ZCode 工具箱 · 自动继续</div>' +
+      '<div class="zps-subtitle">总开关在插件配置页；输入框开关只影响当前会话，这里配置默认策略。</div></div>' +
+      '<button type="button" class="zps-close" data-zps-action="close" aria-label="关闭">×</button></div>' +
       '<div class="zps-current"><span>当前会话</span><b>' + escHtml(modeName) + "</b>" +
       (n != null ? '<span class="zps-dot">·</span><span>连续 ' + n + "/" +
         escHtml(settings.maxConsecutive) + "</span>" : "") + "</div>" +
@@ -1152,8 +1165,8 @@
       "</div>" +
       '<div class="zps-foot"><span class="zps-status" data-zps-status>' +
       (settingsDirty ? "有未保存的更改" : "已保存") + "</span>" +
-      '<div class="zps-actions"><button class="zps-btn" data-zps-action="reset">恢复默认</button>' +
-      '<button class="zps-btn zps-btn-primary" data-zps-action="save">保存</button></div></div>';
+      '<div class="zps-actions"><button type="button" class="zps-btn" data-zps-action="reset">恢复默认</button>' +
+      '<button type="button" class="zps-btn zps-btn-primary" data-zps-action="save">保存</button></div></div>';
     panel.__zpsRendered = true;
   }
 
