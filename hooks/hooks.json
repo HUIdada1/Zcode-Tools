@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/sync.py\" --detach || python3 \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/sync.py\" --detach",
+            "shell": true,
+            "timeoutMs": 120000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/autocontinue_hook.py\" --event stop || python3 \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/autocontinue_hook.py\" --event stop",
+            "shell": true,
+            "timeoutMs": 30000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/autocontinue_hook.py\" --event user-prompt || python3 \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/autocontinue_hook.py\" --event user-prompt",
+            "shell": true,
+            "timeoutMs": 15000
+          }
+        ]
+      }
+    ]
+  }
+}

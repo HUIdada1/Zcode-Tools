@@ -1,0 +1,33 @@
+{
+  "name": "zcode-pilot",
+  "description": "ZCode Pilot 独立插件市场（与早期的同名旧插件彻底分离，不再共用旧市场）：按会话独立的自动继续与循环守卫、设置页独立侧边 tab、性能/用量双框遥测、多模型提示词润色、用量去截断与升级无感自愈。零依赖、幂等注入、安全可还原。",
+  "plugins": [
+    {
+      "name": "zcode-pilot",
+      "source": "./",
+      "version": "0.7.1",
+      "icon": "https://raw.githubusercontent.com/HUIdada1/Zcode-Tools/main/assets/icon.png",
+      "description": "ZCode 桌面客户端全方位原生体验增强套件：按会话独立的自动继续与循环守卫（默认仅故障恢复）、设置页「ZCode Pilot」独立侧边 tab 自定义策略、性能/用量双框遥测与点击明细、提示词多模型智能润色、用量图表去截断、模型浮窗加宽与设置页模型拉取。内置客户端升级自动感知与无感自愈看护，全量幂等、安全可还原，支持按需逐项开关。",
+      "displayName": "ZCode Pilot",
+      "displayName_i18n": {
+        "zh-CN": "ZCode 工具箱"
+      },
+      "description_i18n": {
+        "zh-CN": "为 ZCode 桌面客户端提供全方位原生体验增强：输入框「模式切换」右侧的自动继续开关与循环守卫（意外中断可恢复、关闭保存即全局暂停并作废排队继续）、输入框下方常驻的左右双框遥测条（左框轮/步/速度，右框总 Token/缓存命中，点击各自展开明细）、智能提示词增强（右键自选润色模型）、用量图表全量展示与窗口加宽。内置客户端升级自动感知与无感自愈看护，支持在插件详情页逐项开关，全量幂等且随时可精确还原。"
+      },
+      "category": "developer-tools",
+      "tags": [
+        "zcode",
+        "patch",
+        "enhancement",
+        "auto-continue",
+        "loop-guard",
+        "reasoning-effort",
+        "tps",
+        "prompt-engineering",
+        "self-healing",
+        "productivity"
+      ]
+    }
+  ]
+}

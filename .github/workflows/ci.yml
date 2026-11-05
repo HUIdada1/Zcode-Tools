@@ -1,0 +1,94 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  # 手动触发（可在 Actions 页面指定分支跑一次全量流水线）
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 主流水线：直接调用 autopilot.py，一次跑完 env -> deps -> build -> test
+  # CI 环境不注入 app.asar（--no-deploy），部署步骤由本机看护脚本负责
+  # ---------------------------------------------------------------------------
+  pipeline:
+    name: autopilot (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # README 声明「Python >= 3.10」，用 3.10 兜底，防止误用更高版本才有的 API
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: windows-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # 全自动流水线：依赖自检 -> 构建检查 -> 回归测试，产出机器可读报告
+      - name: 全自动流水线（autopilot）
+        if: hashFiles('autopilot.py') != ''
+        run: python autopilot.py --no-deploy --unattended --report ci-report.md --log logs/ci.log
+
+      # 兼容旧布局：若仓库里还没有 autopilot.py，退回逐项语法检查
+      - name: 语法检查（Python，回退路径）
+        if: hashFiles('autopilot.py') == ''
+        shell: bash
+        run: |
+          set -e
+          # 目录名兼容两种仓库布局：扁平 scripts/ 与插件 skills/zcode-pilot/scripts/
+          for d in scripts skills/zcode-pilot/scripts; do
+            [ -d "$d" ] || continue
+            python -m py_compile "$d"/*.py
+          done
+
+      - name: 语法检查（注入脚本，回退路径）
+        if: hashFiles('autopilot.py') == ''
+        shell: bash
+        run: |
+          set -e
+          for d in scripts skills/zcode-pilot/scripts; do
+            [ -d "$d" ] || continue
+            for f in "$d"/*.js; do node --check "$f"; done
+          done
+
+      - name: 回归测试（回退路径）
+        if: hashFiles('autopilot.py') == ''
+        run: python -m unittest discover -s tests -v
+
+      # 新能力「自动继续」的权威注册点在 hooks/hooks.json：JSON 写坏或漏注册
+      # Stop / UserPromptSubmit 会**静默**失效（日志干净、退出码 0、界面无异常），
+      # 所以这里补一次结构校验（契约 docs/CONTRACT.md §2.3.1）。
+      - name: 校验 hooks.json（自动继续注册）
+        shell: bash
+        run: |
+          python -c "import json,pathlib,sys; h=json.loads(pathlib.Path('hooks/hooks.json').read_text(encoding='utf-8'))['hooks']; m=[e for e in ('Stop','UserPromptSubmit') if e not in h or 'autocontinue_hook.py' not in h[e][0]['hooks'][0]['command']]; sys.exit('hooks.json 注册异常: '+','.join(m) if m else 0)"
+          echo "hooks.json OK: Stop / UserPromptSubmit 已指向 autocontinue_hook.py"
+
+      # 无论成功失败都留下报告与日志，便于定位偶发问题
+      - name: 上传流水线报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-report-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            ci-report.md
+            logs/*.log
+            logs/*.jsonl
+          if-no-files-found: ignore
+          retention-days: 14
