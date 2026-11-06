@@ -64,7 +64,7 @@ jobs:
           def esc(s):
               return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
           lines = []
-          for p, n in (("logs/stdout.log", 40), ("logs/ci.log", 40), ("ci-report.md", 30)):
+          for p, n in (("logs/stdout.log", 400), ("logs/ci.log", 60), ("ci-report.md", 30)):
               f = pathlib.Path(p)
               if f.is_file():
                   lines.append(f"=== {p} ===")
