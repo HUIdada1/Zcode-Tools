@@ -156,6 +156,20 @@ check(/pointerdown/.test(src) && /Escape/.test(src), "面板缺少点击外部 /
 check(!/ztps-pill/.test(src), "源码仍残留旧胶囊样式 .ztps-pill");
 check(!/ztps-seg/.test(src), "源码仍残留旧分段结构 .ztps-seg");
 
+// ---------- 2026-11 视觉改造：绿色双框 / 毛玻璃明细 / 自动收起 ----------
+check(/--ztps-green-strong/.test(src), "缺少双框统一的绿色令牌 --ztps-green-strong");
+check(/\.ztps-chip-main\{color:var\(--ztps-green-strong\)/.test(src), "左/右主值没有统一绿色");
+check(/\.ztps-chip-sub\{color:var\(--ztps-green-soft\)/.test(src), "左/右次级值没有统一绿色");
+check(/fmtTok\(totalTok\)[\s\S]{0,160}\{ dot: true \}/.test(src),
+  "右侧 Token 框没有和左侧一样的状态点");
+check(/marginTop: "3px"/.test(src), "底部边距应从 6px 减半到 3px");
+check(/backdrop-filter:blur\(24px\)/.test(src), "明细面板缺少毛玻璃 backdrop-filter");
+check(/POP_AUTO_CLOSE_MS/.test(src) && /armPopTimer/.test(src),
+  "明细面板缺少无操作自动收起");
+check(/visibilitychange/.test(src), "页面隐藏时明细面板应收起");
+check(!/\[role='menu'\]\.w-48/.test(src) && !/width:20rem!important/.test(src),
+  "模型弹窗加宽覆盖仍残留在 TPS 样式里");
+
 // ---------- 汇报 ----------
 if (failures.length) {
   console.error("FAIL " + failures.length + " 项：");

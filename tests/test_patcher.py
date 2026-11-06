@@ -2713,19 +2713,26 @@ class TestAutoInject(unittest.TestCase):
             self.assertEqual(tasks, [], "单项 reasoning_config=off 应解析为空任务列表")
 
             # 2. 混合任务应只保留其他开关
-            mixed = aae.parse_wants(["--want=reasoning_config=off", "--want=model_width=on"])
-            self.assertEqual(mixed, [(["--model-width"], False)])
+            mixed = aae.parse_wants(["--want=reasoning_config=off", "--want=tps_footer=on"])
+            self.assertEqual(mixed, [(["--tps-footer"], False)])
+
+            # 2b. 已下线的「模型弹窗加宽」不再作为安装项；只接受 cleanup_model_width 的还原
+            self.assertEqual(aae.parse_wants(["--want=model_width=on"]), [],
+                             "已下线的 model_width 必须被忽略，不能又被拉起来")
+            self.assertEqual(aae.parse_wants(["--want=cleanup_model_width=off"]),
+                             [(["--model-width"], True)],
+                             "cleanup_model_width=off 必须转成 --model-width --revert")
 
             # 3. 默认无参数且无 want 文件仍走 DEFAULT_TASKS（计划任务场景兼容）
             default_res = aae.parse_wants([])
             self.assertIsNone(default_res)
 
             # 4. _save_wants 绝不保存 reasoning_config=off，若已有也会被清除
-            fake_want.write_text(json.dumps({"reasoning_config": True, "model_width": True}), encoding="utf-8")
+            fake_want.write_text(json.dumps({"reasoning_config": True, "tps_footer": True}), encoding="utf-8")
             aae._save_wants(["--want=reasoning_config=off"])
             saved = json.loads(fake_want.read_text(encoding="utf-8"))
             self.assertNotIn("reasoning_config", saved)
-            self.assertTrue(saved.get("model_width"))
+            self.assertTrue(saved.get("tps_footer"))
 
             # 5. 旧版 want 文件里的已下线开关（thought_slider）必须被忽略，
             #    不能因 KeyError 让整个退出看护崩掉（0.7.0 移除滑条后的真实故障）。
@@ -3076,9 +3083,10 @@ class TestConsoleEncoding(unittest.TestCase):
         self.assertNotIn("UnicodeEncodeError", out, out[-600:])
         self.assertNotIn("Traceback", out, out[-600:])
         self.assertIn("执行汇总", out)
-        # 9 项 = 6 个 asar 补丁（用量图 / 弹窗宽度 / TPS / 自动继续 / 拉取 / 强化提示词）
+        # 8 项 = 5 个 asar 补丁（用量图 / TPS / 自动继续 / 拉取 / 强化提示词）
         #       + 历史滑条残留清理 + 3.14+ 档位配置 + 内核补丁
-        self.assertIn("合计 9 项", out)
+        # （「模型弹窗加宽」已下线，不再随 --all 安装）
+        self.assertIn("合计 8 项", out)
 
 
 class TestZcodeLogScan(unittest.TestCase):

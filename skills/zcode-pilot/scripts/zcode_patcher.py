@@ -142,11 +142,16 @@ except ImportError:                    # 被别处 import 时脚本目录可能�
 ALL_PATCH_FLAGS = (
     "reasoning_config",   # 3.14+ 档位配置（配置侧原生）
     "usage_chart",
-    "model_width",
     "tps_footer",
     "auto_continue",
     "model_puller",
     "enhance_prompt",
+)
+
+# 已下线的补丁：默认不再安装，只保留 --revert 能力用于清理老用户客户端里残留的字节改动。
+# 注意不要放回 ALL_PATCH_FLAGS —— 否则 --all / 看护会把用户明确要求去掉的加宽又打回来。
+LEGACY_PATCH_FLAGS = (
+    "model_width",
 )
 
 
@@ -155,9 +160,13 @@ def _expand_all(args) -> None:
 
     单独抽成函数是为了可测，并让「--all 到底覆盖了哪些补丁」有唯一事实来源
     （ALL_PATCH_FLAGS）：新加补丁时只改常量，不会再出现「--all 漏了新功能」。
+    已下线补丁只在 `--all --revert` 时展开，保证卸载/还原仍能清干净。
     """
     for name in ALL_PATCH_FLAGS:
         setattr(args, name, True)
+    if getattr(args, "revert", False):
+        for name in LEGACY_PATCH_FLAGS:
+            setattr(args, name, True)
 
 # 兜底合成器：档位名 -> 各协议命名空间的线上参数
 # openai 侧按「原名透传」：智谱系自定义网关（如 workbuddy2api）的档位表是 low/high/max，
@@ -926,13 +935,15 @@ def process_usage_chart(asar: Path, check_only: bool, revert: bool, *,
         return False
 
 
-# ------------------------------------------------- 模型弹窗加宽（asar 内同长度原地改字节）
+# ------------------------------ 模型弹窗加宽（已下线；仅保留 --revert 清理老客户端残留）
 
 def process_model_width(asar: Path, check_only: bool, revert: bool, *,
                         dry_run: bool = False) -> bool:
-    """模型选择弹窗加宽：把 Tailwind 宽度类 w-48(192px) 换成 w-80(320px)。
+    """【已下线】模型选择弹窗加宽：把 Tailwind 宽度类 w-48(192px) 换成 w-80(320px)。
+
+    不再随 `--all` 安装，也不再出现在插件配置页；保留此函数只为让老客户端里残留的
+    字节改动可以 `--model-width --revert` 精确还原（sync.py 检测到残留会自动排一次）。
     与图表补丁同为「同长度字节级原地覆盖」（w-48/w-80 字面量等长），零重打包。
-    文件按内容特征定位（不依赖 assets 文件名哈希），跨版本稳定。
     返回 True=成功/无需改动，False=失败。"""
     side = asar.with_name(asar.name + ".width-patch.json")
     try:
@@ -1556,7 +1567,7 @@ __H__.handle("zcode:pilot-state",async(ev,patch)=>{
 try{
 let{default:n}=await import("node:fs"),{default:r}=await import("node:path"),{default:i}=await import("node:os");
 let dir=r.join(i.homedir(),".zcode","pilot"),file=r.join(dir,"state.json");
-let S={defaultMode:"recover",resumeSilentTurns:!0,guardTools:!0,loopGuard:!0,graceMs:3000,cooldownMs:20000,maxConsecutive:3,continueText:"继续",continueTextMaxTokens:"继续",continueTextSilent:"你上一轮只输出内部推理，无回复也无工具调用，用户什么都没看到。每一轮须以工具调用或可见回复结束。",continueTextLoop:"继续",continueTextInterrupted:"继续",guardPendingText:"上一步工具「{tool}」可能未完成，先确认状态再继续，勿重复执行",guardDoneText:"上一步工具「{tool}」已完成，结果:{result}。勿重复执行，直接继续",loopText:"检测到循环，停止重复刚才动作，换方式继续"};
+let S={defaultMode:"recover",resumeSilentTurns:!0,resumeFailedTurns:!0,guardTools:!0,loopGuard:!0,graceMs:3000,cooldownMs:20000,maxConsecutive:3,continueText:"继续",continueTextMaxTokens:"继续",continueTextSilent:"你上一轮只输出内部推理，无回复也无工具调用，用户什么都没看到。每一轮须以工具调用或可见回复结束。",continueTextLoop:"继续",continueTextInterrupted:"继续",guardPendingText:"上一步工具「{tool}」可能未完成，先确认状态再继续，勿重复执行",guardDoneText:"上一步工具「{tool}」已完成，结果:{result}。勿重复执行，直接继续",loopText:"检测到循环，停止重复刚才动作，换方式继续"};
 let def={version:1,enabled:!0,runtime:!0,paused:!1,cancelToken:0,lastContinueAt:0,sessions:{},journal:{},settings:S};
 let cur={};
 try{let d=JSON.parse(n.readFileSync(file,"utf-8"));if(d&&typeof d=="object"&&!Array.isArray(d))cur=d}catch(_){}
@@ -1571,7 +1582,7 @@ if(!st.journal||typeof st.journal!="object"||Array.isArray(st.journal))st.journa
 let cfg=(st.settings&&typeof st.settings=="object"&&!Array.isArray(st.settings))?st.settings:{};
 let base=Object.assign({},S,cfg);
 if(base.defaultMode!=="recover"&&base.defaultMode!=="loop")base.defaultMode="recover";
-for(let k of ["resumeSilentTurns","guardTools","loopGuard"]){if(typeof base[k]!=="boolean")base[k]=S[k]}
+for(let k of ["resumeSilentTurns","resumeFailedTurns","guardTools","loopGuard"]){if(typeof base[k]!=="boolean")base[k]=S[k]}
 for(let k of ["graceMs","cooldownMs"]){if(typeof base[k]!=="number"||!isFinite(base[k])||base[k]<0)base[k]=S[k];else base[k]=Math.floor(base[k])}
 if(typeof base.maxConsecutive!=="number"||!isFinite(base.maxConsecutive)||base.maxConsecutive<1)base.maxConsecutive=S.maxConsecutive;else base.maxConsecutive=Math.floor(base.maxConsecutive);
 for(let k of ["continueText","continueTextMaxTokens","continueTextSilent","continueTextLoop","continueTextInterrupted","guardPendingText","guardDoneText","loopText"]){if(typeof base[k]!=="string"||!base[k].trim())base[k]=S[k]}
@@ -3295,7 +3306,7 @@ def main() -> int:
     ap.add_argument("--usage-chart", action="store_true",
                     help="补丁用量页：去掉趋势图 Top6 与饼图 Top5+其他模型 的截断，全部模型展示")
     ap.add_argument("--model-width", action="store_true",
-                    help="加宽模型选择弹窗（含渠道子菜单）192px→320px，长模型名不再被截断")
+                    help="【已下线】模型弹窗加宽；不再安装，仅用于 --revert 清理老客户端残留")
     ap.add_argument("--tps-footer", action="store_true",
                     help="注入 TPS 统计栏：输入框下方常驻统计条（本轮指标 + 会话累计），asar 重打包级")
     ap.add_argument("--tps-src", default=None,
@@ -3382,27 +3393,29 @@ def main() -> int:
         if asar_flags:
             print(f"=== 客户端版本 {version or '未知'} | 目标 {len(asars)} 处 | 模式：{mode} ===")
 
+            # 顺序即优先级：客户端升级后常被更新器几秒内重新拉起，写入窗口很短。
+            # 「自动继续」最影响核心体验且脚本体积最大，必须抢在重启竞态之前落盘。
             steps = [
-                (args.usage_chart, "用量页去截断补丁",
-                 lambda a: process_usage_chart(a, args.check, args.revert, dry_run=args.dry_run)),
-                (args.model_width, "模型弹窗加宽补丁",
-                 lambda a: process_model_width(a, args.check, args.revert, dry_run=args.dry_run)),
-                (args.tps_footer, "TPS 统计栏注入",
-                 lambda a: process_tps_footer(a, args.check, args.revert,
-                                              Path(args.tps_src) if args.tps_src else None,
-                                              dry_run=args.dry_run, version=version)),
                 (args.auto_continue, "自动继续注入",
                  lambda a: process_auto_continue(a, args.check, args.revert,
                                                  Path(args.pilot_src) if args.pilot_src else None,
                                                  dry_run=args.dry_run, version=version)),
-                (args.model_puller, "模型拉取按钮注入",
-                 lambda a: process_model_puller(a, args.check, args.revert,
-                                                Path(args.puller_src) if args.puller_src else None,
-                                                dry_run=args.dry_run, version=version)),
+                (args.tps_footer, "TPS 统计栏注入",
+                 lambda a: process_tps_footer(a, args.check, args.revert,
+                                              Path(args.tps_src) if args.tps_src else None,
+                                              dry_run=args.dry_run, version=version)),
                 (args.enhance_prompt, "增强提示词注入",
                  lambda a: process_enhance_prompt(a, args.check, args.revert,
                                                   Path(args.enhance_src) if args.enhance_src else None,
                                                   dry_run=args.dry_run, version=version)),
+                (args.model_puller, "模型拉取按钮注入",
+                 lambda a: process_model_puller(a, args.check, args.revert,
+                                                Path(args.puller_src) if args.puller_src else None,
+                                                dry_run=args.dry_run, version=version)),
+                (args.usage_chart, "用量页去截断补丁",
+                 lambda a: process_usage_chart(a, args.check, args.revert, dry_run=args.dry_run)),
+                (args.model_width, "模型弹窗加宽（已下线，仅还原）",
+                 lambda a: process_model_width(a, args.check, args.revert, dry_run=args.dry_run)),
             ]
             for enabled, title, fn in steps:
                 if not enabled:

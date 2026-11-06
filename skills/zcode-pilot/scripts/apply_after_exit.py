@@ -29,8 +29,12 @@ HERE = Path(__file__).resolve().parent
 LOG = HERE / "_apply_after_exit.log"
 PID_FILE = HERE / "_watchdog.pid"
 WANT_FILE = HERE / "_watchdog.want"
-POLL_SEC = 3
+POLL_SEC = 1
 MAX_WAIT_SEC = 24 * 3600
+#: 客户端改完/更新后常在几秒内被重新拉起。一次写不进去不代表永久失败：
+#: 保留待办、等它下次完全退出再写。轮数是防死循环的硬上限，不是正常路径。
+MAX_PATCH_ROUNDS = 5
+RETRY_DELAY_SEC = 2
 PYTHON = sys.executable or "python"
 #: 子进程超时（秒）。看护是**无人值守**运行的，一旦某个子进程挂死就再也没有人
 #: 会来收拾 —— 表现为「明明退出了却永远不生效」（与 7.5 节那个故障长得一样）。
@@ -133,7 +137,6 @@ def resolve_install() -> tuple[Path | None, Path | None]:
 PATCH_ARGS = {
     "reasoning_config": ["--reasoning-config"],
     "usage_chart": ["--usage-chart"],
-    "model_width": ["--model-width"],
     "tps_footer": ["--tps-footer"],
     "auto_continue": ["--auto-continue"],
     "enhance_prompt": ["--enhance-prompt"],
@@ -142,14 +145,16 @@ PATCH_ARGS = {
     # 历史补丁「思考强度滑条」的残留清理：不是用户开关，只在 sync.py 探测到残留时排一次。
     # 它天然是「删除」动作，off 与 on 同义（parse_wants 只在 enabled=True 时才会排进来）。
     "cleanup_legacy": ["--cleanup-legacy"],
+    # 已下线的「模型弹窗加宽」：只用于还原老客户端里的残留，不再作为可安装功能。
+    # sync.py 以 enabled=False 排进来 → parse_wants 转成 --model-width --revert。
+    "cleanup_model_width": ["--model-width"],
 }
-# 未收到 --want 时的默认动作（本地计划任务用）：全量 7 项补丁按序全部应用，
+# 未收到 --want 时的默认动作（本地计划任务用）：按序应用现行补丁，
 # 外加一次历史滑条残留清理（无残留时是空转，不会误删东西）。
 DEFAULT_TASKS = [
     ["--cleanup-legacy"],
     ["--reasoning-config"],
     ["--usage-chart"],
-    ["--model-width"],
     ["--tps-footer"],
     ["--auto-continue"],
     ["--enhance-prompt"],
@@ -264,6 +269,19 @@ def _cleanup_singletons(cur_pid: int) -> None:
         pass
 
 
+def _release_pid(cur_pid: int) -> None:
+    """只释放 PID 文件，保留 WANT_FILE。
+
+    写入失败时必须保留待办，否则下一次会话启动会忘记「还差哪些补丁」；
+    但 PID 必须释放，否则下一轮看护会把自己当成「已有活跃实例」而直接退出。
+    """
+    try:
+        if PID_FILE.is_file() and PID_FILE.read_text(encoding="utf-8").strip() == str(cur_pid):
+            PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def main() -> int:
     import os
     cur_pid = os.getpid()
@@ -290,14 +308,6 @@ def main() -> int:
         return 0
 
     log(f"看护启动，等待 ZCode 退出 (PID {cur_pid})…")
-    waited = 0
-    while zcode_running():
-        time.sleep(POLL_SEC)
-        waited += POLL_SEC
-        if waited >= MAX_WAIT_SEC:
-            log("等待超时（24h），放弃")
-            _cleanup_singletons(cur_pid)
-            return 1
 
     raw_tasks = parse_wants(sys.argv[1:])
     if raw_tasks is None:
@@ -307,35 +317,67 @@ def main() -> int:
         _cleanup_singletons(cur_pid)
         return 0
     desc = "、".join(("还原 " if rev else "应用 ") + (" ".join(a) or "内核补丁") for a, rev in raw_tasks)
-    log(f"ZCode 已退出（等待 {waited}s），开始处理：{desc}")
+    log(f"待处理：{desc}")
 
     tasks = batch_tasks(raw_tasks)
     failed = 0
-    for args, revert in tasks:
-        cmd = [PYTHON, str(HERE / "zcode_patcher.py"), *args] + (["--revert"] if revert else [])
-        try:
-            r = subprocess.run(cmd, capture_output=True, timeout=PATCH_TIMEOUT,
-                               **no_window_kwargs())
-        except subprocess.TimeoutExpired:
-            # 超时 = 这一项没做成。继续跑剩下的项（能写一项是一项），最后计入 failed。
-            log(f"$ zcode_patcher.py {' '.join(cmd[2:])}  [超时 {PATCH_TIMEOUT}s]")
-            failed += 1
+    for round_no in range(1, MAX_PATCH_ROUNDS + 1):
+        waited = 0
+        while zcode_running():
+            time.sleep(POLL_SEC)
+            waited += POLL_SEC
+            if waited >= MAX_WAIT_SEC:
+                log("等待超时（24h），放弃本轮；待办保留")
+                _release_pid(cur_pid)
+                return 1
+
+        log(f"ZCode 已退出（等待 {waited}s），开始写入（第 {round_no}/{MAX_PATCH_ROUNDS} 轮）")
+        failed = 0
+        for args, revert in tasks:
+            cmd = [PYTHON, str(HERE / "zcode_patcher.py"), *args] + (["--revert"] if revert else [])
+            try:
+                r = subprocess.run(cmd, capture_output=True, timeout=PATCH_TIMEOUT,
+                                   **no_window_kwargs())
+            except subprocess.TimeoutExpired:
+                # 超时 = 这一项没做成。继续跑剩下的项（能写一项是一项），最后计入 failed。
+                log(f"$ zcode_patcher.py {' '.join(cmd[2:])}  [超时 {PATCH_TIMEOUT}s]")
+                failed += 1
+                continue
+            out = ((r.stdout or b"") + (r.stderr or b"")).decode("utf-8", "replace")
+            log(f"$ zcode_patcher.py {' '.join(cmd[2:])}  [exit={r.returncode}]\n{out}".rstrip())
+            if r.returncode == 2:
+                # 等待期间客户端被重新拉起：本轮到此为止，但**绝不能丢待办**。
+                log("预检未通过（ZCode 被重新拉起）——保留未完成项，继续等下次完全退出")
+                failed = 1
+                break
+            if r.returncode != 0:
+                failed += 1
+
+        if failed == 0:
+            break
+
+        # 写失败：如果客户端又跑起来了，等它下次退出再写（这才是最常见的真实场景）。
+        if zcode_running():
+            log("检测到 ZCode 已再次运行：本轮未完成的补丁保留，继续等待下次完全退出")
             continue
-        out = ((r.stdout or b"") + (r.stderr or b"")).decode("utf-8", "replace")
-        log(f"$ zcode_patcher.py {' '.join(cmd[2:])}  [exit={r.returncode}]\n{out}".rstrip())
-        if r.returncode == 2:
-            log("预检未通过（ZCode 在等待期间被重新拉起），本次放弃，不重启")
-            _cleanup_singletons(cur_pid)
-            return 1
-        if r.returncode != 0:
-            failed += 1
+        if round_no < MAX_PATCH_ROUNDS:
+            log(f"写入失败（客户端当前未运行），{RETRY_DELAY_SEC}s 后原地重试")
+            time.sleep(RETRY_DELAY_SEC)
+            continue
+        break
+
+    if failed:
+        log(f"已重试 {MAX_PATCH_ROUNDS} 轮仍有 {failed} 类写入未成功；"
+            "待办已保留，下次会话启动会继续排期（无需手动处理）")
+        _release_pid(cur_pid)
+        return 1
 
     res, exe = resolve_install()
     _cleanup_singletons(cur_pid)
     if exe is None:
         log("未找到 ZCode 主程序（Windows: ZCode.exe / macOS: .app 包内 MacOS/ZCode），请手动启动")
         return 1
-    log(f"处理完成（失败 {failed} 项），重启 ZCode")
+    log("处理完成，重启 ZCode")
     if zcode_running():
         log("检测到 ZCode 已再次运行，跳过重启")
         return 0

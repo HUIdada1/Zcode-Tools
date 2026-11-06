@@ -59,7 +59,6 @@ MIN_PY = (3, 10)
 PATCH_KEYS = [
     ("reasoning_config", "思考档位配置"),
     ("usage_chart", "用量页去截断"),
-    ("model_width", "模型弹窗加宽"),
     ("tps_footer", "TPS 状态栏"),
     ("auto_continue", "自动继续"),
     ("enhance_prompt", "增强提示词"),
@@ -446,7 +445,11 @@ def check_options() -> bool:
                 on_keys.append(key)
     if "core_patch" in saved:
         print(f"        {'思考档位内核补丁':<14} core_patch = {saved['core_patch']}")
-    unknown = [k for k in saved if k not in dict(PATCH_KEYS) and k != "core_patch"]
+    if "model_width" in saved:
+        print(f"        {'模型弹窗加宽':<14} model_width = {saved['model_width']}"
+              "（已下线；老客户端残留会自动还原）")
+    unknown = [k for k in saved
+               if k not in dict(PATCH_KEYS) and k not in ("core_patch", "model_width")]
     for k in unknown:
         print(f"        (未知键) {k} = {saved[k]}")
     if on_keys:
@@ -713,6 +716,10 @@ def check_patches() -> None:
         print("    插件市场「更新」只替换插件目录，不会重新注入 app.asar —— 所以退出重启也不会变。")
         print("    0.6.1 起同步脚本会自动识别并重跑；旧版本请手动修（**完全退出 ZCode 后**执行）：")
         print(f'      python "{PATCHER}" --all')
+        if any("自动继续" in ln for ln in stale):
+            print(f"{WARN} 其中「自动继续」是旧版 → **失败轮次兜底续跑尚未生效**。")
+            print("    provider 流中断 / TurnError 不会触发官方 Stop hook，必须先重注入渲染层脚本；")
+            print("    完全退出（托盘右键退出）后看护会写入，下次启动才生效。")
 
     # ★ 历史「思考强度滑条」已从插件移除（0.7.0）：老用户的 app.asar 里可能还留着它的
     # index.html tag / 脚本条目 / sidecar。不清理不会立刻出事，但那份注入脚本已不再随插件
@@ -723,6 +730,21 @@ def check_patches() -> None:
         print("    清理是外科手术式的：只摘除它自己的 tag / 脚本条目 / sidecar，不动其它补丁。")
         print("    **完全退出 ZCode 后**执行（同步脚本也会自动排一次清理）：")
         print(f'      python "{PATCHER}" --cleanup-legacy')
+
+    # 已下线的「模型弹窗加宽」：不在 --all 里了，单独查一次，避免用户以为它还在。
+    try:
+        r2 = subprocess.run([sys.executable, str(PATCHER), "--model-width", "--check"],
+                            capture_output=True, encoding="utf-8", errors="replace",
+                            cwd=str(HERE), timeout=120, env=env,
+                            **no_window_kwargs())
+        out2 = (r2.stdout or "") + (r2.stderr or "")
+        if "已打" in out2 and "未打" not in out2:
+            print(f"{WARN} 客户端里仍有已下线的「模型弹窗加宽」字节补丁。")
+            print("    它不再随插件安装；同步脚本会在下次完全退出时自动还原，")
+            print("    也可手动执行（**完全退出 ZCode 后**）：")
+            print(f'      python "{PATCHER}" --model-width --revert')
+    except Exception:
+        pass
 
 
 def verdict(py_ok: bool, zcode_ok: bool, has_plugin: bool, enabled: bool,

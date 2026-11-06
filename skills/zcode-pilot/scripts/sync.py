@@ -71,21 +71,24 @@ CLIENT_FINGERPRINT = HERE / "_client_fingerprint.json"
 # **关于「立即写」这条路**：zcode_patcher.py 的运行预检是**全局**的 —— `zcode_running()`
 # 只查 tasklist 里有没有 `ZCode.exe`，与 target 无关；命中就直接 `return 2` 拒绝写入
 # （理由：app.asar 被锁、config.json / provider_config.json 会被客户端回写覆盖）。
-# 而 SessionStart 钩子**必然**在 ZCode 运行中触发，所以标 False 的三项
-# （reasoning_config / usage_chart / model_width）在钩子里永远写不进去 ——
+# 而 SessionStart 钩子**必然**在 ZCode 运行中触发，所以标 False 的两项
+# （reasoning_config / usage_chart）在钩子里永远写不进去 ——
 # 早期版本就是这样：每次装完都报「未处理: xxx(执行失败)」。
 # 现在改成**先试立即写，被拒（refused）就自动转交 apply_after_exit.py**：
 # 桌面端场景退化成「退出时写入」，纯 CLI 场景（没有 ZCode.exe 在跑）仍能即时生效。
 PATCHES = [
     ("reasoning_config", ["--reasoning-config"], False),   # 3.14+ 档位配置（配置侧原生）
     ("usage_chart", ["--usage-chart"], False),
-    ("model_width", ["--model-width"], False),
     ("tps_footer", ["--tps-footer"], True),
     ("auto_continue", ["--auto-continue"], True),
     ("enhance_prompt", ["--enhance-prompt"], True),
     ("model_puller", ["--model-puller"], True),
     ("core_patch", [], False),                             # ≤3.11 内核补丁
 ]
+
+# 已下线的「模型弹窗加宽」：不再随开关安装，只在老客户端里检测到残留时排一次还原。
+LEGACY_MODEL_WIDTH_KEY = "cleanup_model_width"
+LEGACY_MODEL_WIDTH_ARGS = ["--model-width"]
 
 # 历史补丁「思考强度滑条」的残留清理（本插件已移除该功能）：不是用户开关，只在检测到
 # 残留时排给退出后看护执行一次。见 zcode_patcher.py 的 --cleanup-legacy。
@@ -596,6 +599,7 @@ def run_sync(echo: bool = False) -> str:
 
     changed, deferred, failed, skipped, refreshed = [], {}, [], [], []
     legacy_pending = False
+    legacy_model_width_pending = False
     for key, args, repack in PATCHES:
         if key not in wanted:
             continue
@@ -661,6 +665,17 @@ def run_sync(echo: bool = False) -> str:
         legacy_pending = True
         log("检测到历史「思考强度滑条」注入残留 → 已排入 ZCode 退出后清理")
 
+    # 已下线的「模型弹窗加宽」：不再随开关安装。只有老用户配置里还留着这个键时，
+    # 才去检测客户端残留并排一次还原（避免每次同步都跑一次无关的 --check）。
+    if "model_width" in wanted:
+        try:
+            if check_state(LEGACY_MODEL_WIDTH_ARGS) == "on":
+                deferred[LEGACY_MODEL_WIDTH_KEY] = False
+                legacy_model_width_pending = True
+                log("检测到已下线的「模型弹窗加宽」补丁 → 已排入 ZCode 退出后还原")
+        except Exception as exc:  # 检测失败不影响其它补丁
+            log(f"模型弹窗加宽残留检测失败（忽略）: {type(exc).__name__}: {exc}")
+
     if deferred:
         start_watchdog(deferred)
 
@@ -674,9 +689,11 @@ def run_sync(echo: bool = False) -> str:
                      + "、".join(refreshed))
     if legacy_pending:
         parts.append("ZCode 退出时清理历史「思考强度滑条」残留（下次启动可见）")
+    if legacy_model_width_pending:
+        parts.append("ZCode 退出时还原已下线的「模型弹窗加宽」（下次启动可见）")
     # 排除已在 refreshed / legacy 里说明过的键，避免同一项被报两遍（一个空串也是这个原因）
     rest = {k: v for k, v in deferred.items()
-            if k not in refreshed and k != LEGACY_CLEANUP_KEY}
+            if k not in refreshed and k not in (LEGACY_CLEANUP_KEY, LEGACY_MODEL_WIDTH_KEY)}
     if rest:
         parts.append("ZCode 退出时写入（下次启动可见）: " + "、".join(
             f"{k}→{'开' if v else '关'}" for k, v in rest.items()))
@@ -785,7 +802,7 @@ def build_notice(is_upgrade: bool = False, version: str = "") -> str:
         )
     return (
         f"{NOTICE_HEAD}。本次会话启动时已在后台开始同步：\n"
-        "· 七项补丁（思考档位配置、用量页去截断、模型弹窗加宽、TPS 状态栏、自动继续、"
+        "· 六项补丁（思考档位配置、用量页去截断、TPS 状态栏、自动继续、"
         "增强提示词、模型拉取按钮）都要等你**完全退出 ZCode**（托盘图标右键 → 退出）时才会写入 ——\n"
         "  客户端运行期间会拒绝改写 app.asar 与 provider_config.json；退出后由看护写入，"
         "并自动把 ZCode 重新拉起来，再启动即可见。\n"

@@ -58,6 +58,8 @@
   const JOURNAL_STALE_MS = 24 * 60 * 60 * 1000;
   const MAX_CONSECUTIVE = 3;         // dsh 默认值；实际显示用 settings.maxConsecutive
   const LS_JOURNAL = "zpilot-journal";     // 桥不持久化 journal 时的本地镜像（降级）
+  const LS_ERROR_STREAK = "zpilot-error-streak";  // 失败轮次续跑计数（按会话，抗刷新）
+  const ERROR_SEND_MAX = 2;          // 单个失败轮次最多发送尝试次数（首次 + 重试 1 次）
 
   // 契约 §4 文案表（**逐字复制，禁止改写标点**）。
   // 正常续跑由 hook 使用这 9 条；渲染层只在崩溃恢复时用到，默认 #6「继续」。
@@ -78,6 +80,7 @@
   const DEFAULT_SETTINGS = {
     defaultMode: "recover",          // 默认仅故障恢复，不接力正常完成的回合
     resumeSilentTurns: true,
+    resumeFailedTurns: true,         // TurnError 轮次由渲染层兜底续跑（Stop hook 不会触发）
     guardTools: true,
     loopGuard: true,
     graceMs: 3000,
@@ -135,6 +138,13 @@
   let st = { version: 1, enabled: true, runtime: true, paused: false, cancelToken: 0 };
   let sessions = {};        // 契约 §2.2：hook 写，本脚本只读；sessions[sid].mode 由本脚本写
   let journal = {};         // 契约 §2.2：本脚本写（崩溃恢复台账）
+  // 失败轮次兜底：Stop hook 只在成功路径触发，TurnError 不会调用它，只能由渲染层补发。
+  // 计数按会话持久化到 localStorage，刷新/重启后仍能阻止无限连发。
+  let errorStreak = readLS(LS_ERROR_STREAK);
+  if (!errorStreak || typeof errorStreak !== "object" || Array.isArray(errorStreak)) errorStreak = {};
+  const failedTurnHandled = Object.create(null);   // sid -> 已处理过的 turnId（防重复 upsert 连发）
+  const errorSendTries = Object.create(null);      // turnId -> 已发送尝试次数
+  const lastTurnBySid = Object.create(null);       // sid -> 最新 turnId（用户插话后取消兜底）
   let settings = Object.assign({}, DEFAULT_SETTINGS);
   let stateReady = false;
   let lastCancelToken = null;
@@ -147,7 +157,7 @@
     const out = Object.assign({}, DEFAULT_SETTINGS);
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
     if (raw.defaultMode === "recover" || raw.defaultMode === "loop") out.defaultMode = raw.defaultMode;
-    for (const k of ["resumeSilentTurns", "guardTools", "loopGuard"]) {
+    for (const k of ["resumeSilentTurns", "resumeFailedTurns", "guardTools", "loopGuard"]) {
       if (typeof raw[k] === "boolean") out[k] = raw[k];
     }
     for (const k of ["graceMs", "cooldownMs"]) {
@@ -437,12 +447,21 @@
     if (sid) currentSessionId = sid;
     const turnId = row.turnId || null;
     if (turnId) currentTurnId = turnId;
+    if (sid && turnId) lastTurnBySid[sid] = turnId;
     if (row.kind === "turnHeader") {
+      const state = row.state == null ? "" : String(row.state);
       const ended = row.endedAt != null ||
-        (row.state != null && /^(completedSuccess|completed|failed|stopped|cancelled)/.test(String(row.state)));
+        (state !== "" && /^(completedSuccess|completed|failed|stopped|cancelled|completedInterrupted)/.test(state));
       if (ended) {
         streaming = false;
         markTurnEnd(sid);
+        // 部分版本的 upsert 只带 turnId/state，不带 sessionId；用事件流当前会话兜底，
+        // 但 handleFailedTurn 仍会与 DOM 当前会话比对，分屏时不会抢错 composer。
+        const eventSid = sid || currentSessionId;
+        if (state === "completedSuccess") resetErrorStreak(eventSid);
+        // ★ TurnError 不会触发官方 Stop hook（内核只在成功路径 runStopHooks），
+        //   失败轮次只能在这里补发；完成/用户主动停止的轮次绝不接力。
+        if (state === "failed") handleFailedTurn(eventSid, row);
       } else {
         streaming = true;
         touchActivity();
@@ -452,6 +471,8 @@
       streaming = true;
       touchActivity();
       markTurnStart(sid, turnId);
+      // 只有真人输入才清零失败连发计数；自动兜底发出去的「继续」是 synthetic，不能自我刷新。
+      if (row.origin === "realUser") resetErrorStreak(sid || currentSessionId);
     } else if (row.kind === "reasoning" || row.kind === "assistantText") {
       touchActivity();
     }
@@ -828,6 +849,8 @@
       hint: "没有单独设置模式的会话使用此模式。默认仅故障恢复，不接力正常完成的回合。" },
     { key: "resumeSilentTurns", label: "续跑无输出回合", type: "bool",
       hint: "模型有活动但没有可见输出时自动续跑。" },
+    { key: "resumeFailedTurns", label: "失败轮次自动继续", type: "bool",
+      hint: "上游流中断、解析失败等 TurnError 由渲染层兜底补发「继续」；官方 Stop hook 不会在这些失败上触发。" },
     { key: "guardTools", label: "工具幂等护栏", type: "bool",
       hint: "续跑前检查上一步工具调用，避免重复执行有副作用的操作。" },
     { key: "loopGuard", label: "循环守卫", type: "bool",
@@ -1320,6 +1343,43 @@
     return null;
   }
 
+  // 分屏安全：写入/发送必须落在同一个 composer 里，绝不能「写在 A 框、点到 B 框的发送」。
+  function composerScopeOf(el) {
+    if (!el || typeof el.closest !== "function") return null;
+    try {
+      return el.closest("[data-v4-composer-dock='true'], [data-v4-composer-dock], [data-testid='v4-composer']") || null;
+    } catch (err) { return null; }
+  }
+
+  function frameSidOf(el) {
+    if (!el || typeof el.closest !== "function") return null;
+    try {
+      const frame = el.closest("[data-workspace-conversation-frame]");
+      return frame ? frame.getAttribute("data-session-id") : null;
+    } catch (err) { return null; }
+  }
+
+  // 优先在目标 session 的 frame 内找输入框；分屏时 findInput() 的「左上优先」
+  // 可能选中另一框，直接发送就会把「继续」灌到错误的对话里。
+  function findInputForSid(sid) {
+    const input = findInput();
+    if (!sid || !input) return input;
+    const got = frameSidOf(input);
+    if (!got || got === sid) return input;
+    let frame = null;
+    try {
+      const frames = Array.from(document.querySelectorAll("[data-workspace-conversation-frame]"));
+      frame = frames.find((f) => f.getAttribute("data-session-id") === sid) || null;
+    } catch (err) { frame = null; }
+    if (!frame) return input;
+    for (const sel of COMPOSER_INPUT_SELECTORS) {
+      let el = null;
+      try { el = frame.querySelector(sel); } catch (err) { el = null; }
+      if (el) return el;
+    }
+    return input;
+  }
+
   function resolveEditorTarget(el) {
     if (!el) return null;
     try {
@@ -1584,15 +1644,17 @@
     return writeTextLocal(el, text);
   }
 
-  // ============================ 发送（崩溃恢复专用） ============================
+  // ============================ 发送（崩溃恢复 / 失败轮次兜底共用） ============================
   // 契约 §2.3.4：点击 `[data-testid="v4-composer-send"]`（缺失时回退父按钮 / 表单提交）。
   // 注意：绝不点 `v4-stop`（那会打断本轮）。
-  function clickSend() {
+  // `scope` 传输入框所在的 composer/dock 时只在该面板内找按钮 —— 分屏时不会误点另一框。
+  function clickSend(scope) {
     return safe(() => {
-      let btn = document.querySelector("[data-testid='v4-composer-send']");
+      const root = scope && typeof scope.querySelector === "function" ? scope : document;
+      let btn = root.querySelector("[data-testid='v4-composer-send']");
       if (btn && isInsideSidePane(btn)) btn = null;
       if (!btn) {
-        const dock = findDock();
+        const dock = scope || findDock();
         if (dock) {
           const sub = dock.querySelector("button[type='submit']");
           if (sub && !sub.disabled) btn = sub;
@@ -1605,7 +1667,7 @@
         return "click-parent";
       }
       // 回退：表单提交
-      const dock = findDock();
+      const dock = scope || findDock();
       const form = (dock && dock.querySelector("form")) ||
         document.querySelector("[data-testid='v4-composer'] form");
       if (form) {
@@ -1614,6 +1676,148 @@
       }
       return null;
     }, null);
+  }
+
+  // ============================ 失败轮次兜底续跑 ============================
+  // 为什么必须由渲染层兜底：内核的 Stop hook 只有**一个**调用点，且位于模型循环的
+  // 成功收尾分支（zcode.cjs 的 runStopHooks ← 正常 complete "success"）。provider
+  // 流中断、JSON 解析失败、上游 200+error 等 TurnError 会直接发 TurnError 并抛错，
+  // 根本不会进入 Stop hook。因此这些失败只能由渲染层根据 turnHeader.state==="failed"
+  // 补发「继续」；官方 hook 继续负责成功路径上的超限/无输出/仅推理/循环守卫。
+  function saveErrorStreak() {
+    writeLS(LS_ERROR_STREAK, errorStreak);
+  }
+
+  function resetErrorStreak(sid) {
+    if (!sid || !errorStreak[sid]) return;
+    delete errorStreak[sid];
+    saveErrorStreak();
+    diag.errorStreakReset = { sid, at: Date.now() };
+  }
+
+  function errorStreakOf(sid) {
+    const rec = sid ? errorStreak[sid] : null;
+    if (!rec || typeof rec !== "object") return { count: 0, lastAt: 0 };
+    const count = Number(rec.count);
+    const lastAt = Number(rec.lastAt);
+    return {
+      count: isFinite(count) && count > 0 ? count : 0,
+      lastAt: isFinite(lastAt) && lastAt > 0 ? lastAt : 0,
+    };
+  }
+
+  function canResumeFailedTurn(sid, row) {
+    if (!stateReady || bridgeMissing) return "bridge-missing";
+    if (!sid) return "no-session";
+    // 只在用户眼前的会话里补发：分屏/后台会话不抢当前 composer。
+    if (sid !== sessionId()) return "not-current-session";
+    if (!isArmedFor(sid)) return "not-armed";
+    if (settings.resumeFailedTurns !== true) return "setting-off";
+    if (isStreaming()) return "still-streaming";
+    // 只接力真人发起的普通 agent 回合；后台结果/目标续跑/编辑重跑不掺和。
+    if (row.origin && row.origin !== "userInput") return "not-user-input";
+    if (row.executionKind && row.executionKind !== "agent") return "not-agent";
+    const streak = errorStreakOf(sid);
+    if (streak.count >= Math.max(1, Number(settings.maxConsecutive) || MAX_CONSECUTIVE)) {
+      return "streak-limit";
+    }
+    if (streak.lastAt && Date.now() - streak.lastAt < Math.max(0, Number(settings.cooldownMs) || 0)) {
+      return "cooldown";
+    }
+    return "";
+  }
+
+  function handleFailedTurn(sid, row) {
+    if (!row || !sid) return;
+    const turnId = String(row.turnId || row.productTurnId || row.rowId || "");
+    if (!turnId) return;
+    // 同一轮会被 upsert 多次（running → failed），只处理第一次 failed。
+    if (failedTurnHandled[sid] === turnId) return;
+    failedTurnHandled[sid] = turnId;
+
+    const reason = canResumeFailedTurn(sid, row);
+    diag.failedTurn = {
+      sid, turnId, at: Date.now(),
+      reason: reason || "scheduled",
+    };
+    if (reason) return;
+
+    const text = String(settings.continueTextInterrupted || RECOVER_TEXT);
+    diag.errorResumeScheduled = { sid, turnId, graceMs: settings.graceMs };
+    setTaskTimer(() => attemptResumeFailedTurn(sid, turnId, text),
+      Math.max(0, Number(settings.graceMs) || 0));
+  }
+
+  function attemptResumeFailedTurn(sid, turnId, text) {
+    // 用户可能在这几秒里自己发了消息、切了会话或关了开关：逐项重新校验，
+    // 任何一项不成立就放弃，绝不把「继续」盖到用户的新输入上。
+    if (!isArmedFor(sid) || settings.resumeFailedTurns !== true) {
+      diag.errorResumeResult = "cancelled";
+      return;
+    }
+    if (sid !== sessionId()) {
+      diag.errorResumeResult = "session-changed";
+      return;
+    }
+    if (lastTurnBySid[sid] && lastTurnBySid[sid] !== turnId) {
+      diag.errorResumeResult = "new-turn-took-over";
+      return;
+    }
+    if (isStreaming()) {
+      diag.errorResumeResult = "still-streaming";
+      return;
+    }
+
+    const tries = Number(errorSendTries[turnId] || 0) + 1;
+    errorSendTries[turnId] = tries;
+    if (tries > ERROR_SEND_MAX) {
+      diag.errorResumeResult = "give-up";
+      toast("自动继续：失败轮次续跑未成功，请手动发送「继续」");
+      return;
+    }
+
+    const input = findInputForSid(sid);
+    if (!input) {
+      diag.errorResumeResult = "no-input";
+      setTaskTimer(() => attemptResumeFailedTurn(sid, turnId, text), 800);
+      return;
+    }
+    const inputSid = frameSidOf(input);
+    if (inputSid && inputSid !== sid) {
+      // 找不到目标会话的输入框（例如分屏另一框）→ 宁可不发，也不能发错对话。
+      diag.errorResumeResult = "wrong-pane";
+      return;
+    }
+    if (!writeIntoComposer(input, text)) {
+      diag.errorResumeResult = "write-failed";
+      setTaskTimer(() => attemptResumeFailedTurn(sid, turnId, text), 800);
+      return;
+    }
+    const sentAt = Date.now();
+    const method = clickSend(composerScopeOf(input));
+    diag.errorResumeSend = method;
+    if (!method) {
+      diag.errorResumeResult = "no-send-button";
+      setTaskTimer(() => attemptResumeFailedTurn(sid, turnId, text), 800);
+      return;
+    }
+
+    setTaskTimer(() => {
+      if (activitySince(sentAt)) {
+        const streak = errorStreakOf(sid);
+        errorStreak[sid] = { count: streak.count + 1, lastAt: Date.now() };
+        saveErrorStreak();
+        diag.errorResumeResult = "ok";
+        diag.errorResumeStreak = errorStreak[sid];
+        return;
+      }
+      diag.errorResumeResult = "no-activity";
+      if (tries < ERROR_SEND_MAX) {
+        setTaskTimer(() => attemptResumeFailedTurn(sid, turnId, text), 800);
+      } else {
+        toast("自动继续：失败轮次续跑未成功，请手动发送「继续」");
+      }
+    }, VERIFY_MS);
   }
 
   // ============================ 崩溃恢复（唯一发送路径） ============================
@@ -1682,10 +1886,15 @@
     }
 
     const text = String(entry.text || "").trim() || settings.continueTextInterrupted || RECOVER_TEXT;
-    const input = findInput();
+    const input = findInputForSid(sid);
     if (!input) {
       diag.recoverResult = "找不到输入框";
       setTaskTimer(() => attemptRecover(sid, entry), 800);
+      return;
+    }
+    const inputSid = frameSidOf(input);
+    if (inputSid && inputSid !== sid) {
+      diag.recoverResult = "输入框属于其他会话";
       return;
     }
     const ok = writeIntoComposer(input, text);
@@ -1696,7 +1905,7 @@
       return;
     }
     const sentAt = Date.now();
-    const method = clickSend();
+    const method = clickSend(composerScopeOf(input));
     diag.recoverSend = method;
     if (!method) {
       diag.recoverResult = "发送按钮缺失";
@@ -1806,5 +2015,9 @@
     writeText: writeIntoComposer,
     clickSend,
     findInput,
+    // 只读诊断（排障用）：现在若发生 TurnError 会不会兜底、失败原因是什么。
+    whyFailedWouldResume: (over) => canResumeFailedTurn(
+      sessionId(), Object.assign({ origin: "userInput", executionKind: "agent" }, over || {})),
+    errorStreak: () => Object.assign({}, errorStreak),
   };
 })();

@@ -7,7 +7,7 @@ description: 从备份精确还原 ZCode 客户端补丁
 ```bash
 python "<skill目录>/scripts/zcode_patcher.py" --reasoning-config --revert   # 档位配置（3.14+）
 python "<skill目录>/scripts/zcode_patcher.py" --usage-chart --revert
-python "<skill目录>/scripts/zcode_patcher.py" --model-width --revert
+python "<skill目录>/scripts/zcode_patcher.py" --model-width --revert   # 已下线功能的残留清理（可选）
 python "<skill目录>/scripts/zcode_patcher.py" --tps-footer --revert
 python "<skill目录>/scripts/zcode_patcher.py" --auto-continue --revert
 python "<skill目录>/scripts/zcode_patcher.py" --enhance-prompt --revert

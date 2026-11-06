@@ -289,6 +289,32 @@ class TestSettingsTabStatic(unittest.TestCase):
         self.assertIn("maxConsecutive: 3", self.src)
 
 
+class TestFailedTurnFallback(unittest.TestCase):
+    """TurnError 兜底：官方 Stop hook 只在成功路径触发，失败轮次必须由渲染层补发。
+
+    这一组是「跨层契约」：hook 默认值、主进程 settings 白名单、渲染层事件判定
+    三处任一漏改，失败轮次都会静默不续跑（界面上只看到一条报错，没有任何提示）。
+    """
+
+    def test_hook_defaults_carry_resume_failed_turns(self):
+        self.assertTrue(hook.DEFAULT_SETTINGS["resumeFailedTurns"])
+        self.assertIn("resumeFailedTurns", hook._BOOL_KEYS)
+
+    def test_renderer_detects_failed_turn_and_sends(self):
+        src = read_script("zcode-pilot.js")
+        for needle in ('resumeFailedTurns', "function handleFailedTurn",
+                       'state === "failed"', "function attemptResumeFailedTurn",
+                       "errorResumeResult", "whyFailedWouldResume"):
+            self.assertIn(needle, src, needle)
+        # 用户主动停止不是 TurnError，绝不能进兜底分支
+        self.assertNotIn('state === "completedInterrupted") handleFailedTurn', src)
+
+    def test_main_handler_whitelists_resume_failed_turns(self):
+        patcher = (_SCRIPTS / "zcode_patcher.py").read_text(encoding="utf-8")
+        self.assertIn("resumeFailedTurns:!0", patcher)
+        self.assertIn('"resumeFailedTurns","guardTools"', patcher)
+
+
 class TestNineTexts(StateFileCase):
     """§4 九条文案是「唯一文案表」，标点都算契约内容。"""
 

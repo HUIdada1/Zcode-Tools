@@ -104,6 +104,8 @@ VALID_DEFAULT_MODES = ("recover", "loop")
 DEFAULT_SETTINGS = {
     "defaultMode": "recover",
     "resumeSilentTurns": True,
+    # TurnError 轮次由渲染层兜底（Stop hook 不会在这些失败上触发）；此键仅共享契约/设置页用。
+    "resumeFailedTurns": True,
     "guardTools": True,
     "loopGuard": True,
     "graceMs": GRACE_MS,
@@ -124,7 +126,7 @@ _TEXT_KEYS = (
     "continueTextLoop", "continueTextInterrupted",
     "guardPendingText", "guardDoneText", "loopText",
 )
-_BOOL_KEYS = ("resumeSilentTurns", "guardTools", "loopGuard")
+_BOOL_KEYS = ("resumeSilentTurns", "resumeFailedTurns", "guardTools", "loopGuard")
 _NUMBER_KEYS = ("graceMs", "cooldownMs", "maxConsecutive")
 
 

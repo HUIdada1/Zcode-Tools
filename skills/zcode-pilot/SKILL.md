@@ -1,13 +1,13 @@
 ---
 name: zcode-pilot
-description: "[仅手动调用，禁止自动触发] ZCode 工具箱（zcode-pilot）· ZCode 客户端本地补丁注入工具：①思考档位配置（3.14+ 原生 optionSpecs，无需内核补丁）②思考档位透传（≤3.11 内核补丁）③用量页去截断（趋势图/饼图全量）④模型弹窗加宽 ⑤TPS 状态栏（输入框下方常驻统计条：本轮指标+会话累计，分段小图标）⑥自动继续 + 循环守卫（Stop hook 权威续跑 + 输入框「模式切换」右侧按会话开关 + 设置页「ZCode Pilot」侧边 tab 自定义策略）⑦增强提示词按钮（一键润色输入框草稿，右键可选润色所用模型）⑧设置页一键模型拉取按钮。全部幂等、可 --check、可 --revert 精确还原。只有当用户明确要求执行本 skill、或明确点名「zcode-pilot」时才加载；用户只是泛泛提到思考等级、用量图、状态栏、补丁等话题时，一律不要自动触发本 skill。"
+description: "[仅手动调用，禁止自动触发] ZCode 工具箱（zcode-pilot）· ZCode 客户端本地补丁注入工具：①思考档位配置（3.14+ 原生 optionSpecs，无需内核补丁；≤3.11 走内核补丁）②用量页去截断（趋势图/饼图全量）③TPS 状态栏（输入框下方常驻统计条：绿色双框、毛玻璃明细、无操作自动收起）④设置页一键模型拉取按钮（毛玻璃按钮与选择弹窗）⑤自动继续 + 循环守卫（Stop hook 权威续跑 + 失败轮次渲染层兜底 + 输入框「模式切换」右侧按会话开关 + 设置页「ZCode Pilot」侧边 tab 自定义策略）⑥增强提示词按钮（一键润色输入框草稿，右键毛玻璃菜单选润色模型）。全部幂等、可 --check、可 --revert 精确还原。只有当用户明确要求执行本 skill、或明确点名「zcode-pilot」时才加载；用户只是泛泛提到思考等级、用量图、状态栏、补丁等话题时，一律不要自动触发本 skill。"
 ---
 
 # ZCode 工具箱（zcode-pilot）· ZCode 客户端补丁工具
 
 > 本 skill 由 **ZCode Pilot** 插件提供（插件名 `zcode-pilot`，中文显示名「ZCode 工具箱」），脚本就在本 skill 目录下的 `scripts/`（下文所有 `<skill目录>` 均指本目录）。
 
-**先跑这一条**（只读，不改任何文件，一条命令看全部 8 项功能的状态）：
+**先跑这一条**（只读，不改任何文件，一条命令看全部补丁状态）：
 
 ```bash
 python "<skill目录>/scripts/zcode_patcher.py" --all --check
@@ -53,15 +53,17 @@ python "<skill目录>/scripts/doctor.py" --where  # 只查「插件装在哪」+
 | ① 思考档位透传（内核补丁） | 需要，走 `providerOptionsByLevel` 兜底 | **已过时**：内核机制整体重写（`providerOptionsByLevel` 只剩 schema 定义，`variants/defaultVariant` 已从内核消失），锚点与结构提取都失效。脚本会提示「原生档位机制，本补丁不适用」 |
 | ①′ 档位配置 `--reasoning-config` | 不需要（用 ①） | **需要**：把档位写进 `provider_config.json` 的 `providerModelRules[].config.optionSpecs.reasoningLevel`（`values` = 界面档位、末位即默认；`map` = CEL，内核发请求前求值并合并进请求体；支持 `maxOutputTokens`）。无需内核补丁 |
 | ② 用量页去截断 | 需要 | 需要（已支持弹性正则动态匹配，抗混淆变量漂移） |
-| ③ 模型弹窗加宽 | 两处锚点 | 需要，但只剩**扁平弹窗**一处（渠道子菜单上游已改为自适应宽度 `w-max min-w-48`，脚本识别后报「无需补丁」） |
-| ④ TPS 状态栏 | 需要 | 需要（支持原生思考 Token 统计、耗时精准校准与双态按钮常驻追踪） |
-| ⑤ 模型拉取按钮 | 需要 | 需要，优先对齐官方 `model-provider-add-model-button` 契约，模板按 `optionSpecs` 新格式写入 |
-| ⑥ 自动继续 + 循环守卫 | —（新功能） | 需要：四组件注入（renderer 脚本 + index.html 挂载 + preload 桥 + main handler）；续跑决策走官方 **Stop hook**，不依赖客户端内部 API |
-| ⑦ 增强提示词 | —（新功能） | 需要：优先对接官方 `v4-model-config` 契约锚点；支持右键按供应商自选模型，持久化且免重启 |
+| ③ TPS 状态栏 | 需要 | 需要（支持原生思考 Token 统计、耗时精准校准与双态按钮常驻追踪） |
+| ④ 模型拉取按钮 | 需要 | 需要，优先对齐官方 `model-provider-add-model-button` 契约，模板按 `optionSpecs` 新格式写入 |
+| ⑤ 自动继续 + 循环守卫 | —（新功能） | 需要：四组件注入（renderer 脚本 + index.html 挂载 + preload 桥 + main handler）；续跑决策走官方 **Stop hook**，不依赖客户端内部 API |
+| ⑥ 增强提示词 | —（新功能） | 需要：优先对接官方 `v4-model-config` 契约锚点；支持右键按供应商自选模型，持久化且免重启 |
 
-> **升级会整体覆盖 app.asar**：除 ①（配置侧，写 `provider_config.json`）外，②–⑦ 升级后都需重跑。
-> 其中**重打包级**（④ TPS 状态栏 / ⑤ 模型拉取按钮 / ⑥ 自动继续 / ⑦ 增强提示词）重跑时会按内容比对
-> 自动热更新脚本，无需先 `--revert`；② 用量图 / ③ 弹窗加宽是**字节级原地覆盖**，重跑即可。
+> **升级会整体覆盖 app.asar**：除 ①（配置侧，写 `provider_config.json`）外，②–⑥ 升级后都需重跑。
+> 其中**重打包级**（③ TPS 状态栏 / ④ 模型拉取按钮 / ⑤ 自动继续 / ⑥ 增强提示词）重跑时会按内容比对
+> 自动热更新脚本，无需先 `--revert`；② 用量图是**字节级原地覆盖**，重跑即可。
+>
+> 旧版「模型弹窗加宽」已下线：不再随插件安装；老客户端里若还有残留，看护会在下次完全退出时自动
+> `--model-width --revert`，也可手动还原。
 
 > **已移除的能力（0.7.0）**：思考强度滑条已从插件中彻底删除 —— 配套注入脚本、补丁链路与
 > `ALL_PATCH_FLAGS` 条目一并移除，本 skill 不再提供任何滑条相关参数。老用户客户端里历史注入的
@@ -105,7 +107,6 @@ python "<skill目录>/scripts/doctor.py" --where  # 只查「插件装在哪」+
 |---|---|---|---|
 | 思考档位配置（3.14+） | `--reasoning-config` | 开 | ZCode 退出时自动应用，**再启动**才生效（两次启停） |
 | 用量页去截断 | `--usage-chart` | 开 | ZCode 退出时自动应用，**再启动**才生效（两次启停） |
-| 模型弹窗加宽 | `--model-width` | 开 | ZCode 退出时自动应用，**再启动**才生效（两次启停） |
 | TPS 状态栏 | `--tps-footer` | 开 | ZCode 退出时自动应用，**再启动**才生效（两次启停） |
 | 自动继续 + 循环守卫 | `--auto-continue` | 开 | ZCode 退出时自动应用，**再启动**才生效（两次启停）；输入框开关只影响当前会话；关闭并保存会全局暂停并作废排队中的继续；设置页另有「ZCode Pilot」侧边 tab 可自定义策略 |
 | 增强提示词按钮 | `--enhance-prompt` | 开 | ZCode 退出时自动应用，**再启动**才生效（两次启停） |
@@ -238,12 +239,11 @@ python "<skill目录>/scripts/zcode_patcher.py" --model-puller
 | 思考等级透传（≤3.11） | 给自定义模型配思考等级 | `python zcode_patcher.py [--check/--revert/--extract]` | 内核 zcode.cjs（原地改写，.bak 备份） |
 | 打开统计图 | 用量页趋势图/饼图去截断 | `python zcode_patcher.py --usage-chart [--check/--revert]` | app.asar 内渲染文件（同长度原地改字节 + integrity 同步） |
 | 打开状态栏 | 输入框下方居中统计条（**v2 纯 DOM 观测，3.12.2+ 安全**；位置固定不可切换）：本轮指标 + 会话累计（第 N 轮/输入/命中+平均命中率/累出） | `python zcode_patcher.py --tps-footer [--check/--revert]` | app.asar（重打包级：注入脚本 + 挂载 index.html） |
-| **自动继续 + 循环守卫** | 一轮结束后自动续跑（Stop hook 权威决策），「模式切换」右侧提供**按会话**开关（只影响当前对话），设置页「扩展 → ZCode Pilot」tab 可自定义默认策略 | `python zcode_patcher.py --auto-continue [--check/--revert]` | app.asar（重打包级：renderer 脚本 + index.html 挂载 + preload 桥 + main IPC）；续跑决策另由 `hooks/hooks.json` 的 Stop hook 承担 |
-| 加宽模型弹窗 | 模型选择浮窗加宽，长模型名不再截断 | `python zcode_patcher.py --model-width [--check/--revert]` | app.asar 内主 bundle（同长度原地改字节） |
-| **增强提示词** | 输入框旁一键润色草稿（可恢复原文）；**右键**弹出菜单选择使用哪个模型 | `python zcode_patcher.py --enhance-prompt [--check/--revert]` | app.asar（重打包级：renderer 脚本 + index.html + preload 桥 + main IPC） |
-| 模型拉取按钮 | 设置页一键拉取/勾选模型 | `python zcode_patcher.py --model-puller [--check/--revert]` | app.asar（重打包级：renderer 脚本 + index.html + preload 桥 + main IPC） |
+| **自动继续 + 循环守卫** | 一轮结束后自动续跑（Stop hook 权威决策；失败轮次由渲染层兜底），「模式切换」右侧提供**按会话**开关（只影响当前对话），设置页「扩展 → ZCode Pilot」tab 可自定义默认策略 | `python zcode_patcher.py --auto-continue [--check/--revert]` | app.asar（重打包级：renderer 脚本 + index.html 挂载 + preload 桥 + main IPC）；续跑决策另由 `hooks/hooks.json` 的 Stop hook 承担 |
+| **增强提示词** | 输入框旁一键润色草稿（可恢复原文）；悬浮不弹原生提示；**右键**毛玻璃菜单选择使用哪个模型 | `python zcode_patcher.py --enhance-prompt [--check/--revert]` | app.asar（重打包级：renderer 脚本 + index.html + preload 桥 + main IPC） |
+| 模型拉取按钮 | 设置页一键拉取/勾选模型（玻璃胶囊按钮 + 毛玻璃选择弹窗） | `python zcode_patcher.py --model-puller [--check/--revert]` | app.asar（重打包级：renderer 脚本 + index.html + preload 桥 + main IPC） |
 
-两个及以上功能可一次执行：`python zcode_patcher.py --usage-chart --model-width --tps-footer --auto-continue --model-puller`。
+两个及以上功能可一次执行：`python zcode_patcher.py --usage-chart --tps-footer --auto-continue --model-puller`。
 全部功能一条命令：`python zcode_patcher.py --all [--check/--revert]`（等价于写全上表所有补丁参数 + 内核补丁）。
 另有命令行版拉模型（不动 asar，直接同步 config.json + provider_config.json）：`python scripts/model_pull.py --all [--dry-run]`。
 
@@ -255,12 +255,11 @@ python "<skill目录>/scripts/zcode_patcher.py" --model-puller
 
 1. **定位安装**：脚本自动探测（运行中进程 → 注册表 → 常见目录，跨 Windows/macOS/Linux，见「跨平台约定」）；探测不到就把安装根目录作为位置参数传入（加 `--verbose` 看每一步探测结果）。
 2. **只读核实**（能否生效的判断，全部只读，可放心先跑）：
-   - `python zcode_patcher.py --all --check`：**一条命令看全部 8 项**（含客户端版本、8 行执行汇总表）。
+   - `python zcode_patcher.py --all --check`：**一条命令看全部补丁**（含客户端版本与执行汇总表）。
      用户问「现在什么状态」「装好了吗」时先跑这条；下面各条是单项细看。
    - `python zcode_patcher.py --reasoning-config --check`：**3.14.x 先看这个**——哪些模型已配档位、哪些缺档位、哪些已在界面手动配置过（冲突会跳过）。
    - `python zcode_patcher.py --check`：内核补丁状态；输出「原生档位机制（optionSpecs），本补丁不适用」即 3.14+，直接走上面的 `--reasoning-config`；≤3.11 且版本不在「已知符号表」时跑 `--extract`——能提取出锚点即可生效，提取失败说明内核结构变了，按「新版本锚点提取」人工分析后再动。
    - `python zcode_patcher.py --usage-chart --check`：两个截断表达式是否命中。
-   - `python zcode_patcher.py --model-width --check`：扁平弹窗锚点是否命中（3.14.x 渠道子菜单锚点已不存在，报「上游已改为自适应宽度，无需补丁」属预期）。
    - `python zcode_patcher.py --tps-footer --check`：index.html 是否找到、注入状态。
    - `python zcode_patcher.py --auto-continue --check`：自动继续四组件（renderer / index 挂载 / preload 桥 / main handler）逐个是否就位。
    - `python zcode_patcher.py --model-puller --check`：四组件（renderer / index 挂载 / preload 桥 / main handler）逐个是否就位。
@@ -388,7 +387,6 @@ ZCode 升级会覆盖 zcode.cjs 与 app.asar，升级后过一遍（**先完全�
 python zcode_patcher.py --check                    # 思考等级：3.14+ 会提示"不需要本补丁"
 python zcode_patcher.py --reasoning-config --check # 档位配置（3.14+ 看这个）
 python zcode_patcher.py --usage-chart --check
-python zcode_patcher.py --model-width --check
 python zcode_patcher.py --tps-footer --check
 python zcode_patcher.py --auto-continue --check
 python zcode_patcher.py --model-puller --check
@@ -518,15 +516,17 @@ python zcode_patcher.py --usage-chart --revert   # 从 sidecar 还原全部原�
 - 两处调色盘均 6 色循环取色，第 7+ 个模型颜色重复，靠图例/标签区分
 - 定位按文件名特征 + 截断表达式匹配，与文件名哈希无关，跨版本稳定（3.9.1→3.9.2 文件名哈希变化仍能命中）
 
-## 三、加宽模型选择弹窗
+## 三、模型弹窗加宽（已下线）
 
-模型选择浮窗（点工具栏模型名弹出的那个，含「先选渠道、再选模型」的二级子菜单）默认宽 `w-48` = **192px**，长模型名（如 `cn:deepseek-v4.1-flash`、带前缀的供应商模型）会被 `truncate` 截断，只能靠 hover 的 `title` 看全。本补丁把它加宽到 `w-80` = **320px**。
+该功能已从插件移除：不再随 `--all` 安装，也不再出现在插件配置页。老客户端里如果还留着当年的
+同长度字节改动，`sync.py` 会在检测到后于下次完全退出时自动排一次还原；也可手动清理：
 
 ```bash
-python zcode_patcher.py --model-width            # 打补丁（同长度字节级原地覆盖）
-python zcode_patcher.py --model-width --check    # 查状态
-python zcode_patcher.py --model-width --revert   # 从 sidecar 还原
+python zcode_patcher.py --model-width --check    # 查是否还有残留
+python zcode_patcher.py --model-width --revert   # 从 sidecar 还原（完全退出 ZCode 后）
 ```
+
+> 注意：不要再把 `--model-width` 加回 `ALL_PATCH_FLAGS`，否则用户明确要求去掉的加宽会被重新打回。
 
 两处补丁点（都在渲染层主 bundle，如 `out/renderer/assets/styles-*.js`）：
 
@@ -609,16 +609,17 @@ python zcode_patcher.py --tps-footer --tps-src /path/to/zcode-tps.js   # 指定�
 - **无假时钟**：不显示时间段，绝不拿当前时间冒充轮次时间。
 - **空会话常驻**：左右两框始终在位，显示 `0轮0步 · —tok/s` 与 `0 tok · 缓存命中 —`，进入对话后自然补齐。
 
-### 视觉说明（0.7.1 双框改版，**只动展示层**，事件关联与注入层未改）
+### 视觉说明（2026-11 玻璃化改版，**只动展示层**，事件关联与注入层未改）
 
 | 项 | 规格 |
 |---|---|
-| 双框 | 26px 高、9px 圆角、发丝描边 + 极浅投影，两框间距 8px；左框带 6px 状态点 |
-| 框内 | 主值加粗（11px）+ `·` + 次级值（10px）；统一 `tabular-nums`（`font-feature-settings:"tnum"`） |
-| 明细面板 | 248px 宽、12px 字号、标题图标 + 分隔线 + 左标签右数值；Token 全量千分位（20,026,706 tok） |
-| 面板定位 | `body` 级 `fixed`，锚定所点框；优先向下、放不下翻上；点击外部 / Esc 收起 |
-| 三态 | `idle` 静默灰点 / `stream` 绿点呼吸 + 左框底色与描边加强 / `done` 转静默，由 `data-state` 驱动 |
-| 主题 | 优先取应用 CSS 变量（如 `--color-foreground`），缺失时回退自身变量；自身变量按「`.dark` / `[data-theme='light']` → `prefers-color-scheme`」两级判定 |
+| 双框 | 26px 高、9px 圆角、绿色玻璃底 + 内高光 + 发丝描边，两框间距 8px；**左右两框都带 6px 状态点**，主题统一 emerald |
+| 框内 | 主值加粗（11px，`--ztps-green-strong`）+ `·` + 次级值（10px，`--ztps-green-soft`）；统一 `tabular-nums` |
+| 明细面板 | 268px 宽、16px 圆角、`backdrop-filter: blur(24px) saturate(165%)` + 绿色环境光 + 内高光；Token 全量千分位（20,026,706 tok） |
+| 面板定位 | `body` 级 `fixed`，锚定所点框；优先向下、放不下翻上（`data-placement` 控制入场方向）；点击外部 / Esc / **无操作 15s** 收起 |
+| 三态 | `idle` 静默绿点 / `stream` 绿点呼吸 + 双框底色与描边加强 / `done` 转静默，由 `data-state` 驱动 |
+| 主题 | 自身变量按「`.dark` / `[data-theme='light']` → `prefers-color-scheme`」两级判定；绿色令牌 `--ztps-green-*` 统一控制 |
+| 底部边距 | 状态条 `marginTop` 3px（原 6px 减半），与输入框同宽、水平居中 |
 | 无障碍 | 框是 `role=button` 且可键盘 Enter/Space 打开；`prefers-reduced-motion: reduce` 下关闭呼吸与过渡 |
 | 零外部资源 | 无字体、无图片（图标是内联 SVG 字符串）、无网络请求，全部样式由 `zcode-tps.js` 自身注入 |
 
@@ -793,6 +794,32 @@ python zcode_patcher.py --auto-continue --pilot-src /path/to/zcode-pilot.js   # 
   traceback 当成续跑文本灌给模型。因此 hook **全包 try/except、永远 exit 0、出错时静默不输出**。
 - `--event user-prompt` 只把该会话的 `consecutive` 清零，**不输出**。
 
+### TurnError 兜底：Stop hook 的结构性盲区（契约 §2.3.6）
+
+内核 `zcode.cjs` 的 `runStopHooks` **只有一个调用点**，位于模型循环的**成功收尾分支**
+（`turnMachine.complete(..., "success")`）。因此以下失败**不会触发 Stop hook**：
+
+- provider 流中断（`upstream_stream_read_error`、`ProviderBusinessError`）；
+- SSE JSON 解析失败（`AI_JSONParseError` / `Bad control character`）；
+- 上游 HTTP 200 但 body 是 `{"error":...}`。
+
+这类轮次在界面上表现为 `Turn execution failed ... retryable=false`，日志里是
+`turn.failed` → `TurnError`。它们只能由**渲染层**根据事件流
+`row.kind === "turnHeader" && row.state === "failed"` 兜底：
+
+1. 同一 `turnId` 只处理一次；`completedInterrupted`（用户主动停止）不接力；
+2. 校验当前会话/开关/暂停/流式/`origin=userInput`/`executionKind=agent`/连发上限/冷却；
+3. 等 `graceMs` → 五级写回 + `v4-composer-send` 发送 `continueTextInterrupted`；
+4. 1.5s 无流式活动重试，单个 turnId 最多 2 次；成功按 `session_id` 记
+   `localStorage["zpilot-error-streak"]`，成功回合或真人输入清零。
+
+排障只读入口：`window.__zpilotApi.whyFailedWouldResume()`（返回空串=现在会兜底，
+否则返回 `setting-off` / `not-armed` / `streak-limit` / `cooldown` 等原因）
+与 `window.__zpilotApi.errorStreak()`。
+
+> 该兜底依赖渲染层脚本注入；**Stop hook 本身不依赖 asar**，客户端升级后仍存活，
+> 但失败轮次兜底必须等插件重新注入（完全退出后看护写入）后才生效。
+
 ### 状态文件（唯一权威）
 
 路径：`~/.zcode/pilot/state.json`。**多个写方共用，必须读-改-写**，并发写用「同目录临时文件 + `os.replace`」原子替换：
@@ -812,7 +839,8 @@ python zcode_patcher.py --auto-continue --pilot-src /path/to/zcode-pilot.js   # 
                                   "lastActivityAt": 0, "text": "继续" } }, // 崩溃恢复台账（渲染层写）
   "settings": {                                                         // 设置页侧边 tab（渲染层写 / hook 读）
     "defaultMode": "recover",   // recover | loop（默认仅故障恢复，不接力正常完成）
-    "resumeSilentTurns": true, "guardTools": true, "loopGuard": true,
+    "resumeSilentTurns": true, "resumeFailedTurns": true,
+    "guardTools": true, "loopGuard": true,
     "graceMs": 3000, "cooldownMs": 20000, "maxConsecutive": 3,
     "continueText": "继续", "continueTextMaxTokens": "继续",
     "continueTextSilent": "……", "continueTextLoop": "继续",
@@ -893,7 +921,7 @@ preload / main 注入块复用 `_process_ipc_patch(..., PILOT_SPEC)` 链路，�
 
 | 现象 | 处理 |
 |---|---|
-| 一轮结束后没有自动继续 | ① `--auto-continue --check` 看四组件是否就位；② 看 `hooks/hooks.json` 是否注册了 `Stop`（ZCode 日志里 `hookCount` 为 0 = 插件没启用）；③ 状态文件里 `enabled` 为真、`paused` 为假，且当前会话 `sessions[sid].mode` 不是 `off`；④ 是否正撞上 20s 冷却或本会话已连续 3 次 |
+| 一轮结束后没有自动继续 | ① `--auto-continue --check` 看四组件是否就位；② 看 `hooks/hooks.json` 是否注册了 `Stop`（ZCode 日志里 `hookCount` 为 0 = 插件没启用）；③ 状态文件里 `enabled` 为真、`paused` 为假，且当前会话 `sessions[sid].mode` 不是 `off`；④ 是否正撞上 20s 冷却或本会话已连续 3 次；⑤ 若是 `Turn execution failed ... retryable=false`，Stop hook **不会触发**，检查渲染层是否已注入最新版（`window.__zpilotApi.whyFailedWouldResume()`），旧注入会显示 `bridge-missing` 或无此 API |
 | 自动继续太频繁 | 冷却 20s 是硬常量，不可调；确认没有多会话同时在跑（计数按 `session_id` 分桶） |
 | 关掉开关后仍在自动打断 | 输入框开关只关**当前会话**（写 `sessions[sid].mode=off`）。要全局关停请在插件配置页把「自动继续」关闭并保存（写 `enabled:false` + `paused:true` + `cancelToken` +1），或直接改状态文件 |
 | 循环守卫误伤 | 判据要求**尾部连续**重复且结果之间无差异信号；中途换了动作并已产生输出即不算循环。可用 `python scripts/loopguard.py --transcript <transcript.jsonl>` 复核判定 |
@@ -1006,6 +1034,9 @@ baseURL + 有 apiKey + 无 `systemDisabledReason`）→ 点选某项即生效。
   **永远同源**，不会出现两套逻辑漂移导致的「菜单里能选、点了报不可用」。
 - 菜单是挂在 `document.body` 上的 **fixed 浮层**，**不进 composer 子树** —— 既不会被
   虚拟列表 / 重渲染搬走，也不参与输入框布局（不会再把图标位置搞乱）。
+- **视觉（2026-11）**：16px 圆角毛玻璃（`backdrop-filter: blur(24px) saturate(165%)`）+
+  绿色环境光；分组标题大写小字、选中项绿色勾选 + 左侧高亮条、底部「选中即生效 · Esc 关闭」提示。
+  润色按钮**不写 `title`**，鼠标悬浮只出现玻璃绿高亮（不再弹原生提示）。
 - `zcode:enhance-model-save` **只增删 `providerId`/`modelId` 两个键**，
   `maxTokens` / `temperature` / 思考强度等参数原样保留 —— 选个模型不该抹掉你调好的参数。
 - 写失败会**显式报错**（toast），不静默吞掉：否则用户以为选好了，下次点击仍走旧档位。

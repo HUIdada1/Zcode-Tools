@@ -314,6 +314,19 @@ function boot(doc, bridgeState, opts) {
   sandbox.addEventListener = function (t, fn) { (this.__listeners[t] = this.__listeners[t] || []).push(fn); };
   sandbox.removeEventListener = function () {};
 
+  // 失败轮次兜底依赖 localStorage 持久化的连发计数；测试可预置。
+  if (o.errorStreak) sandbox.localStorage.setItem("zpilot-error-streak", JSON.stringify(o.errorStreak));
+
+  // ServicePort 桩：脚本通过 window message 接管端口，随后只监听、不 start。
+  // 失败轮次兜底完全依赖这条事件流（turnHeader.state==="failed"），所以必须真喂帧。
+  const port = {
+    __listeners: Object.create(null),
+    __started: false,
+    addEventListener(t, fn) { (this.__listeners[t] = this.__listeners[t] || []).push(fn); },
+    start() { this.__started = true; },
+  };
+  sandbox.__pilotPort = port;
+
   if (!o.noBridge) {
     sandbox.zcode = {
       pilotState: async (patch) => {
@@ -341,8 +354,37 @@ function boot(doc, bridgeState, opts) {
     };
   }
   vm.runInNewContext(src, sandbox, { filename: "zcode-pilot.js" });
+  // vm 会把 sandbox contextify：脚本里看到的 window/globalThis 是 context 代理，
+  // 不是我们传进去的裸对象。事件里的 e.source 必须用**代理**才等于脚本里的 window。
+  const vmWindow = vm.runInNewContext("globalThis", sandbox);
+  if (process.env.PILOT_DEBUG) {
+    console.error("[debug] listeners=", Object.keys(sandbox.__listeners),
+      "message=", (sandbox.__listeners.message || []).length,
+      "windowIsSandbox=", sandbox.window === sandbox,
+      "vmWindowIsSandbox=", vmWindow === sandbox,
+      "portHooked=", sandbox.__zpilotDiag && sandbox.__zpilotDiag.portHooked);
+  }
+
+  // 模拟主进程把 ServicePort 转交渲染层（两种格式都走这一条监听）。
+  const handoff = { source: vmWindow, data: { type: "zcode:service-port" }, ports: [port] };
+  for (const fn of (sandbox.__listeners.message || []).slice()) {
+    try { fn(handoff); } catch (e) { bad.push("ServicePort 接管抛异常: " + e.message); }
+  }
+  if (process.env.PILOT_DEBUG) {
+    console.error("[debug] after handoff portHooked=", sandbox.__zpilotDiag && sandbox.__zpilotDiag.portHooked,
+      "port.__zpilot=", port.__zpilot, "portListeners=", (port.__listeners.message || []).length);
+  }
+
   return {
-    sandbox, clock, calls, timers,
+    sandbox, clock, calls, timers, port,
+    feed: (rows, op) => {
+      const events = (rows || []).map((row) => ({ op: op || "row.upserted", row }));
+      const payload = JSON.stringify({ frame: { payload: { events } } });
+      const bytes = new Uint8Array(Buffer.from(payload, "utf8"));
+      for (const fn of (port.__listeners.message || []).slice()) {
+        try { fn({ data: bytes }); } catch (e) { bad.push("事件帧处理抛异常: " + e.message); }
+      }
+    },
     setState: (patch) => { state = Object.assign({}, state, patch); },
     tick: () => { for (const fn of timers.intervals.slice()) { try { fn(); } catch (e) { bad.push("定时器抛异常: " + e.message); } } },
     // ★ 排空「已排队的继续」：clearTimeout 掉的必须真的不再执行
@@ -578,6 +620,93 @@ async function main() {
     t7.row.children.map((c) => c.getAttribute("data-testid") || c.tagName).join(">"));
   check(h7.sandbox.__zpilotDiag.toggleWhere === "after-trigger",
     "搬回后 diag.toggleWhere 应为 after-trigger，实际=" + h7.sandbox.__zpilotDiag.toggleWhere);
+
+  // ============ 场景 8：TurnError 失败轮次 → 渲染层兜底补发「继续」 ============
+  // 这是官方 Stop hook 的结构性盲区：内核只在成功收尾分支调用 runStopHooks，
+  // provider 流中断（upstream_stream_read_error 等）走 TurnError，根本不会触发 Stop。
+  const failedRow = (over) => Object.assign({
+    kind: "turnHeader", sessionId: "s-1", turnId: "turn-f1", state: "failed",
+    origin: "userInput", executionKind: "agent", startedAt: 1, endedAt: 2, rowId: 1,
+  }, over || {});
+  const doc8 = makeDocument();
+  const t8 = buildTree(doc8);
+  const h8 = boot(doc8, {}, {});
+  await tickAsync();
+  h8.tick();
+  await tickAsync();
+  check(h8.sandbox.__zpilotDiag.portHooked === true,
+    "ServicePort 未被接管，turnHeader 事件无法到达渲染层");
+  h8.feed([{ kind: "turnHeader", sessionId: "s-1", turnId: "turn-f1", state: "running",
+             origin: "userInput", executionKind: "agent", startedAt: 1 }]);
+  h8.feed([failedRow()]);
+  const d8 = h8.sandbox.__zpilotDiag;
+  check(d8.failedTurn && d8.failedTurn.reason === "scheduled",
+    "失败轮次应排入兜底续跑，diag.failedTurn=" + JSON.stringify(d8.failedTurn));
+  check(h8.pendingTimers() >= 1, "失败轮次应先等宽限期，不应立刻发送");
+  h8.runTimers(1);
+  await tickAsync();
+  check(t8.input.value === "继续", "失败轮次兜底没把「继续」写进输入框，实际=" + JSON.stringify(t8.input.value));
+  check(t8.send.__clicks === 1 && d8.errorResumeSend === "click-send",
+    "失败轮次兜底必须点击 v4-composer-send，实际点击=" + t8.send.__clicks + " send=" + d8.errorResumeSend);
+  check(h8.pendingTimers() >= 1, "发送后应留下 1.5s 流式活动校验定时器");
+  // 同一轮被重复 upsert → 绝不能重复发送（此时流式校验定时器还没跑）
+  h8.feed([failedRow()]);
+  check(t8.send.__clicks === 1, "同一 turnId 的重复 failed upsert 不得重复发送，实际点击=" + t8.send.__clicks);
+  // 模拟新轮次开始（有活动）→ 校验通过并累加连发计数
+  h8.clock.now += 1000;
+  h8.feed([{ kind: "reasoning", sessionId: "s-1", turnId: "turn-f1", text: "x", state: "streaming" }]);
+  h8.runTimers(1);
+  await tickAsync();
+  check(d8.errorResumeResult === "ok", "有流式活动后应判定续跑成功，实际=" + d8.errorResumeResult);
+  const streak8 = JSON.parse(h8.sandbox.localStorage.getItem("zpilot-error-streak") || "{}");
+  check(streak8["s-1"] && streak8["s-1"].count === 1,
+    "成功续跑后应按会话记 1 次，实际=" + JSON.stringify(streak8));
+  // 真人输入 → 清零连发计数（自动发的 synthetic 不能自我清零）
+  h8.feed([{ kind: "userInput", sessionId: "s-1", turnId: "turn-u1", origin: "realUser", text: "hi" }]);
+  const streak8b = JSON.parse(h8.sandbox.localStorage.getItem("zpilot-error-streak") || "{}");
+  check(!streak8b["s-1"], "真人输入后应清零失败连发计数，实际=" + JSON.stringify(streak8b));
+
+  // ============ 场景 9：兜底的各类拒绝条件（绝不能误发） ============
+  const bootFailed = async (state, opts, row) => {
+    const doc = makeDocument();
+    const tree = buildTree(doc);
+    const h = boot(doc, state, opts);
+    await tickAsync(); h.tick(); await tickAsync();
+    h.feed([failedRow(row)]);
+    return { h, tree, d: h.sandbox.__zpilotDiag };
+  };
+  const off = await bootFailed({ sessions: { "s-1": { mode: "off" } } }, {});
+  check(off.d.failedTurn && off.d.failedTurn.reason === "not-armed" && off.tree.send.__clicks === 0,
+    "当前会话关闭时不得兜底，reason=" + JSON.stringify(off.d.failedTurn));
+  const paused = await bootFailed({ paused: true }, {});
+  check(paused.d.failedTurn && paused.d.failedTurn.reason === "not-armed" && paused.tree.send.__clicks === 0,
+    "全局暂停时不得兜底，reason=" + JSON.stringify(paused.d.failedTurn));
+  const settingOff = await bootFailed({ settings: { resumeFailedTurns: false } }, {});
+  check(settingOff.d.failedTurn && settingOff.d.failedTurn.reason === "setting-off" && settingOff.tree.send.__clicks === 0,
+    "resumeFailedTurns=false 时不得兜底，reason=" + JSON.stringify(settingOff.d.failedTurn));
+  const limited = await bootFailed({}, { errorStreak: { "s-1": { count: 3, lastAt: 0 } } });
+  check(limited.d.failedTurn && limited.d.failedTurn.reason === "streak-limit" && limited.tree.send.__clicks === 0,
+    "达到最大连续次数后不得兜底，reason=" + JSON.stringify(limited.d.failedTurn));
+  const cooled = await bootFailed({}, { errorStreak: { "s-1": { count: 1, lastAt: 1700000000000 } } });
+  check(cooled.d.failedTurn && cooled.d.failedTurn.reason === "cooldown" && cooled.tree.send.__clicks === 0,
+    "冷却期内不得兜底，reason=" + JSON.stringify(cooled.d.failedTurn));
+  const otherSession = await bootFailed({}, {}, { sessionId: "s-2" });
+  check(otherSession.d.failedTurn && otherSession.d.failedTurn.reason === "not-current-session" && otherSession.tree.send.__clicks === 0,
+    "非当前会话失败不得抢当前 composer，reason=" + JSON.stringify(otherSession.d.failedTurn));
+  const goal = await bootFailed({}, {}, { origin: "goalContinuation" });
+  check(goal.d.failedTurn && goal.d.failedTurn.reason === "not-user-input" && goal.tree.send.__clicks === 0,
+    "目标续跑等非真人回合不得兜底，reason=" + JSON.stringify(goal.d.failedTurn));
+  const control = await bootFailed({}, {}, { executionKind: "controlOnly" });
+  check(control.d.failedTurn && control.d.failedTurn.reason === "not-agent" && control.tree.send.__clicks === 0,
+    "controlOnly 回合不得兜底，reason=" + JSON.stringify(control.d.failedTurn));
+  // 用户主动停止（completedInterrupted）不是 TurnError，绝不接力
+  const interruptedDoc = makeDocument();
+  const interruptedTree = buildTree(interruptedDoc);
+  const interrupted = boot(interruptedDoc, {}, {});
+  await tickAsync(); interrupted.tick(); await tickAsync();
+  interrupted.feed([failedRow({ state: "completedInterrupted" })]);
+  check(!interrupted.sandbox.__zpilotDiag.failedTurn && interruptedTree.send.__clicks === 0,
+    "completedInterrupted 不得走 TurnError 兜底，实际 diag=" + JSON.stringify(interrupted.sandbox.__zpilotDiag.failedTurn));
 
   if (bad.length) {
     console.error("pilot mount smoke FAILED（" + bad.length + " 项）：");

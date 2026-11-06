@@ -8,7 +8,6 @@ description: 只读检查 ZCode 客户端各补丁的注入状态（不修改任
 python "<skill目录>/scripts/zcode_patcher.py" --reasoning-config --check   # 3.14+ 档位配置状态
 python "<skill目录>/scripts/zcode_patcher.py" --check                       # 内核补丁（3.14+ 会提示"不需要本补丁"）
 python "<skill目录>/scripts/zcode_patcher.py" --usage-chart --check
-python "<skill目录>/scripts/zcode_patcher.py" --model-width --check
 python "<skill目录>/scripts/zcode_patcher.py" --tps-footer --check
 python "<skill目录>/scripts/zcode_patcher.py" --auto-continue --check
 python "<skill目录>/scripts/zcode_patcher.py" --enhance-prompt --check

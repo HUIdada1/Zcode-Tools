@@ -837,7 +837,7 @@ def step_deploy(log: Logger, dry_run: bool, *, unattended: bool,
         # 看护的 --want 参数与 sync.py 保持同一套键名
         wants = [
             "--want=reasoning_config=on", "--want=usage_chart=on",
-            "--want=model_width=on", "--want=tps_footer=on",
+            "--want=tps_footer=on",
             "--want=enhance_prompt=on",
             "--want=model_puller=on", "--want=core_patch=on",
         ]

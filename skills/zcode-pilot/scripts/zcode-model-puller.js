@@ -383,6 +383,199 @@
   `;
   document.head.appendChild(style);
 
+  // ============ 视觉覆盖层：毛玻璃 / 绿色科技感 / 高级质感 ============
+  // 追加在旧样式之后，用同选择器覆盖颜色、圆角、阴影与动效；结构类名保持不变，
+  // 避免影响拉取/搜索/勾选/保存逻辑。
+  const glass = document.createElement("style");
+  glass.id = "zcode-model-puller-glass-v1";
+  glass.textContent = `
+    :root{
+      --zpg-ink:#0f172a;--zpg-muted:#64748b;--zpg-soft:#94a3b8;
+      --zpg-accent:#10b981;--zpg-accent-2:#059669;--zpg-accent-ink:#065f46;
+      --zpg-surface:rgba(16,185,129,.10);--zpg-surface-2:rgba(16,185,129,.16);
+      --zpg-line:rgba(16,185,129,.16);--zpg-line-2:rgba(16,185,129,.26);
+      --zpg-glass:linear-gradient(155deg,rgba(255,255,255,.94) 0%,rgba(236,253,245,.88) 55%,rgba(255,255,255,.92) 100%);
+      --zpg-glass-soft:linear-gradient(180deg,rgba(255,255,255,.78),rgba(240,253,247,.66));
+      --zpg-shadow:0 28px 70px rgba(15,23,42,.20),0 6px 18px rgba(15,23,42,.08),inset 0 1px 0 rgba(255,255,255,.85);
+      --zpg-focus:0 0 0 3px rgba(16,185,129,.18);
+      --zpg-mono:ui-monospace,SFMono-Regular,Consolas,monospace;
+      --zpg-sans:-apple-system,BlinkMacSystemFont,"Segoe UI Variable","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+      --zpg-ease:cubic-bezier(.22,1,.36,1);
+    }
+    .dark,html.dark,body.dark{
+      --zpg-ink:#ecfdf5;--zpg-muted:rgba(236,253,245,.62);--zpg-soft:rgba(236,253,245,.42);
+      --zpg-accent:#34d399;--zpg-accent-2:#10b981;--zpg-accent-ink:#d1fae5;
+      --zpg-surface:rgba(52,211,153,.10);--zpg-surface-2:rgba(52,211,153,.16);
+      --zpg-line:rgba(52,211,153,.14);--zpg-line-2:rgba(52,211,153,.24);
+      --zpg-glass:linear-gradient(155deg,rgba(20,30,26,.94) 0%,rgba(8,16,13,.96) 55%,rgba(12,22,18,.94) 100%);
+      --zpg-glass-soft:linear-gradient(180deg,rgba(18,28,24,.72),rgba(8,16,13,.62));
+      --zpg-shadow:0 32px 80px rgba(0,0,0,.66),0 6px 18px rgba(0,0,0,.40),inset 0 1px 0 rgba(255,255,255,.10);
+      --zpg-focus:0 0 0 3px rgba(52,211,153,.20);
+    }
+    @media (prefers-color-scheme:dark){
+      :root:not(.light):not([data-theme='light']){
+        --zpg-ink:#ecfdf5;--zpg-muted:rgba(236,253,245,.62);--zpg-soft:rgba(236,253,245,.42);
+        --zpg-accent:#34d399;--zpg-accent-2:#10b981;--zpg-accent-ink:#d1fae5;
+        --zpg-surface:rgba(52,211,153,.10);--zpg-surface-2:rgba(52,211,153,.16);
+        --zpg-line:rgba(52,211,153,.14);--zpg-line-2:rgba(52,211,153,.24);
+        --zpg-glass:linear-gradient(155deg,rgba(20,30,26,.94) 0%,rgba(8,16,13,.96) 55%,rgba(12,22,18,.94) 100%);
+        --zpg-glass-soft:linear-gradient(180deg,rgba(18,28,24,.72),rgba(8,16,13,.62));
+        --zpg-shadow:0 32px 80px rgba(0,0,0,.66),0 6px 18px rgba(0,0,0,.40),inset 0 1px 0 rgba(255,255,255,.10);
+        --zpg-focus:0 0 0 3px rgba(52,211,153,.20);
+      }
+    }
+
+    /* ---------- 触发按钮：玻璃胶囊 + 内外双层质感 ---------- */
+    #zcode-auto-pull-models-btn{
+      display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 13px 0 6px;
+      margin-left:8px;margin-top:4px;border-radius:999px;
+      border:1px solid var(--zpg-line-2);
+      background:linear-gradient(180deg,var(--zpg-surface-2),var(--zpg-surface));
+      color:var(--zpg-accent-ink);
+      font-family:var(--zpg-sans);font-size:12.5px;font-weight:650;letter-spacing:.01em;line-height:1;
+      cursor:pointer;user-select:none;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.32),0 2px 10px rgba(16,185,129,.10);
+      transition:transform .22s var(--zpg-ease),box-shadow .22s var(--zpg-ease),background .22s var(--zpg-ease),color .22s var(--zpg-ease);
+    }
+    #zcode-auto-pull-models-btn:hover{
+      transform:translateY(-1px);
+      background:linear-gradient(180deg,rgba(16,185,129,.24),rgba(16,185,129,.14));
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.40),0 8px 22px rgba(16,185,129,.20);
+    }
+    #zcode-auto-pull-models-btn:active{transform:translateY(0) scale(.99)}
+    #zcode-auto-pull-models-btn:focus-visible{outline:none;box-shadow:var(--zpg-focus),inset 0 1px 0 rgba(255,255,255,.35)}
+    #zcode-auto-pull-models-btn.loading{opacity:.72;cursor:wait;pointer-events:none}
+    .zcode-pull-icon-wrap{
+      width:22px;height:22px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;
+      background:rgba(16,185,129,.18);box-shadow:inset 0 0 0 1px rgba(16,185,129,.28);
+      transition:transform .22s var(--zpg-ease),background .22s var(--zpg-ease);
+    }
+    #zcode-auto-pull-models-btn:hover .zcode-pull-icon-wrap{transform:scale(1.06);background:rgba(16,185,129,.24)}
+    .zcode-pull-bolt-icon{width:13px;height:13px;fill:currentColor}
+    @keyframes zcodeSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+    .zcode-spin-icon{animation:zcodeSpin .9s linear infinite}
+
+    /* ---------- 遮罩：深色玻璃，聚焦弹窗 ---------- */
+    .zcode-pull-modal-overlay{
+      position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;
+      background:rgba(3,8,6,.52);
+      -webkit-backdrop-filter:blur(18px) saturate(145%);backdrop-filter:blur(18px) saturate(145%);
+      animation:zcodeFadeIn .22s var(--zpg-ease);
+      font-family:var(--zpg-sans);
+    }
+    @keyframes zcodeFadeIn{from{opacity:0}to{opacity:1}}
+
+    /* ---------- 弹窗：双框玻璃 + 环境绿光 ---------- */
+    .zcode-pull-modal{
+      position:relative;width:600px;max-width:92vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;
+      border-radius:20px;border:1px solid var(--zpg-line-2);
+      background:var(--zpg-glass);color:var(--zpg-ink);
+      box-shadow:var(--zpg-shadow);
+      -webkit-backdrop-filter:blur(28px) saturate(165%);backdrop-filter:blur(28px) saturate(165%);
+      animation:zcodeScaleIn .26s var(--zpg-ease);
+    }
+    .zcode-pull-modal::before{
+      content:"";position:absolute;inset:0;pointer-events:none;
+      background:radial-gradient(120% 80% at 0% 0%,rgba(16,185,129,.16),transparent 56%);
+    }
+    @keyframes zcodeScaleIn{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:none}}
+    .zcode-pull-header{
+      position:relative;z-index:1;padding:18px 20px 14px;display:flex;align-items:center;justify-content:space-between;gap:14px;
+      border-bottom:1px solid var(--zpg-line);background:transparent;
+    }
+    .zcode-pull-title{display:flex;align-items:center;gap:11px;min-width:0;color:var(--zpg-ink);font-size:15px;font-weight:650;letter-spacing:.01em}
+    .zcode-pull-title .zcode-pull-icon-wrap{width:30px;height:30px;flex:0 0 auto;background:rgba(16,185,129,.16);box-shadow:inset 0 0 0 1px rgba(16,185,129,.26)}
+    .zcode-pull-title .zcode-pull-bolt-icon{width:16px;height:16px}
+    .zcode-pull-heading{display:flex;flex-direction:column;gap:3px;min-width:0}
+    .zcode-pull-heading-main{font-size:15px;font-weight:650;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .zcode-pull-sub{font-size:11px;font-weight:500;color:var(--zpg-muted);letter-spacing:.02em}
+    .zcode-pull-close{
+      flex:0 0 auto;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;
+      background:rgba(127,127,127,.08);border:1px solid transparent;border-radius:999px;
+      color:var(--zpg-muted);font-size:15px;line-height:1;cursor:pointer;
+      transition:background .2s var(--zpg-ease),color .2s var(--zpg-ease),transform .2s var(--zpg-ease),box-shadow .2s var(--zpg-ease);
+    }
+    .zcode-pull-close:hover{background:var(--zpg-surface);color:var(--zpg-accent-ink);box-shadow:inset 0 0 0 1px var(--zpg-line-2);transform:rotate(90deg)}
+    .zcode-pull-body{position:relative;z-index:1;padding:16px 20px;overflow:hidden;flex:1;display:flex;flex-direction:column;gap:12px}
+    .zcode-pull-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .zcode-pull-search{
+      flex:1;min-width:0;box-sizing:border-box;background:var(--zpg-glass-soft);border:1px solid var(--zpg-line);border-radius:12px;
+      padding:9px 13px;color:var(--zpg-ink);font-family:var(--zpg-sans);font-size:13px;outline:none;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.28);
+      transition:border-color .2s var(--zpg-ease),box-shadow .2s var(--zpg-ease),background .2s var(--zpg-ease);
+    }
+    .zcode-pull-search::placeholder{color:var(--zpg-soft)}
+    .zcode-pull-search:focus{border-color:var(--zpg-accent);box-shadow:var(--zpg-focus),inset 0 1px 0 rgba(255,255,255,.32)}
+    .zcode-pull-btn-group{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+    .zcode-pull-mini-btn{
+      background:rgba(127,127,127,.08);border:1px solid var(--zpg-line);border-radius:999px;
+      color:var(--zpg-ink);font-family:var(--zpg-sans);font-size:11.5px;font-weight:550;padding:6px 11px;
+      cursor:pointer;white-space:nowrap;
+      transition:background .2s var(--zpg-ease),color .2s var(--zpg-ease),transform .2s var(--zpg-ease),box-shadow .2s var(--zpg-ease);
+    }
+    .zcode-pull-mini-btn:hover{background:var(--zpg-surface);color:var(--zpg-accent-ink);box-shadow:inset 0 0 0 1px var(--zpg-line-2)}
+    .zcode-pull-mini-btn:active{transform:scale(.98)}
+    .zcode-pull-list{
+      flex:1;max-height:380px;overflow-y:auto;overscroll-behavior:contain;
+      border:1px solid var(--zpg-line);border-radius:14px;background:var(--zpg-glass-soft);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.22);
+    }
+    .zcode-pull-list::-webkit-scrollbar{width:8px}
+    .zcode-pull-list::-webkit-scrollbar-thumb{background:rgba(16,185,129,.26);border-radius:999px;border:2px solid transparent;background-clip:padding-box}
+    .zcode-pull-list::-webkit-scrollbar-track{background:transparent}
+    .zcode-pull-item{
+      display:flex;align-items:center;padding:10px 13px;cursor:pointer;user-select:none;
+      border-bottom:1px solid var(--zpg-line);
+      transition:background .18s var(--zpg-ease),transform .18s var(--zpg-ease);
+    }
+    .zcode-pull-item:last-child{border-bottom:none}
+    .zcode-pull-item:hover{background:var(--zpg-surface);transform:translateX(1px)}
+    .zcode-pull-item input[type="checkbox"]{margin-right:12px;accent-color:var(--zpg-accent);width:16px;height:16px;cursor:pointer;pointer-events:none}
+    .zcode-pull-item-name{flex:1;min-width:0;font-family:var(--zpg-mono);font-size:12.5px;color:var(--zpg-ink);letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .zcode-pull-badge{font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:999px;letter-spacing:.02em;white-space:nowrap}
+    .zcode-pull-badge-new{background:rgba(16,185,129,.14);color:var(--zpg-accent-ink);box-shadow:inset 0 0 0 1px var(--zpg-line-2)}
+    .zcode-pull-badge-exists{background:rgba(127,127,127,.10);color:var(--zpg-muted);box-shadow:inset 0 0 0 1px rgba(127,127,127,.14)}
+    .zcode-pull-footer{
+      position:relative;z-index:1;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;
+      border-top:1px solid var(--zpg-line);background:transparent;
+    }
+    .zcode-pull-count-info{font-size:12px;color:var(--zpg-muted);letter-spacing:.01em}
+    .zcode-pull-count-info strong{color:var(--zpg-accent-ink);font-weight:650}
+    .zcode-pull-footer-btns{display:flex;gap:9px}
+    .zcode-pull-btn-cancel{
+      padding:8px 17px;border-radius:999px;font-family:var(--zpg-sans);font-size:12.5px;font-weight:600;
+      background:rgba(127,127,127,.08);border:1px solid var(--zpg-line);color:var(--zpg-ink);cursor:pointer;
+      transition:background .2s var(--zpg-ease),color .2s var(--zpg-ease),transform .2s var(--zpg-ease);
+    }
+    .zcode-pull-btn-cancel:hover{background:var(--zpg-surface);color:var(--zpg-accent-ink);transform:translateY(-1px)}
+    .zcode-pull-btn-submit{
+      padding:8px 18px;border-radius:999px;font-family:var(--zpg-sans);font-size:12.5px;font-weight:650;
+      display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:#fff;
+      background:linear-gradient(180deg,var(--zpg-accent),var(--zpg-accent-2));
+      border:1px solid rgba(255,255,255,.22);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 6px 18px rgba(16,185,129,.24);
+      transition:transform .2s var(--zpg-ease),box-shadow .2s var(--zpg-ease),filter .2s var(--zpg-ease);
+    }
+    .zcode-pull-btn-submit:hover{transform:translateY(-1px);filter:brightness(1.04);box-shadow:inset 0 1px 0 rgba(255,255,255,.40),0 10px 24px rgba(16,185,129,.30)}
+    .zcode-pull-btn-submit:active{transform:translateY(0) scale(.99)}
+    .zcode-pull-btn-submit:focus-visible{outline:none;box-shadow:var(--zpg-focus),0 6px 18px rgba(16,185,129,.24)}
+    .zcode-pull-btn-submit:disabled{opacity:.45;cursor:not-allowed;transform:none;filter:none;box-shadow:none}
+    .zcode-custom-toast{
+      position:fixed;top:26px;left:50%;transform:translateX(-50%);z-index:1000000;
+      background:var(--zpg-glass);color:var(--zpg-ink);padding:11px 18px;border-radius:999px;
+      border:1px solid var(--zpg-line-2);box-shadow:var(--zpg-shadow);
+      -webkit-backdrop-filter:blur(22px) saturate(160%);backdrop-filter:blur(22px) saturate(160%);
+      font-family:var(--zpg-sans);font-size:13px;font-weight:550;display:flex;align-items:center;gap:8px;
+      animation:zcodeToastPop .26s var(--zpg-ease);
+    }
+    @keyframes zcodeToastPop{from{opacity:0;transform:translate(-50%,-10px) scale(.98)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
+    @media (prefers-reduced-motion:reduce){
+      #zcode-auto-pull-models-btn,.zcode-pull-modal,.zcode-pull-modal-overlay,.zcode-custom-toast{animation:none!important;transition:none!important}
+      #zcode-auto-pull-models-btn:hover,.zcode-pull-close:hover,.zcode-pull-item:hover{transform:none}
+    }
+  `;
+  document.head.appendChild(glass);
+
   function showToast(message, duration = 3000) {
     const existing = document.querySelector(".zcode-custom-toast");
     if (existing) existing.remove();
@@ -635,15 +828,20 @@
     overlay.className = "zcode-pull-modal-overlay";
 
     overlay.innerHTML = `
-      <div class="zcode-pull-modal">
+      <div class="zcode-pull-modal" role="dialog" aria-modal="true" aria-label="选择要同步的模型">
         <div class="zcode-pull-header">
           <div class="zcode-pull-title">
-            <svg class="zcode-pull-bolt-icon" viewBox="0 0 24 24" style="color: #3b82f6;">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-            </svg>
-            <span>选择要同步的模型 (共 ${models.length} 个，待添加新模型 ${newCount} 个)</span>
+            <span class="zcode-pull-icon-wrap">
+              <svg class="zcode-pull-bolt-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+              </svg>
+            </span>
+            <span class="zcode-pull-heading">
+              <span class="zcode-pull-heading-main">选择要同步的模型</span>
+              <span class="zcode-pull-sub">共 ${models.length} 个 · 待添加 ${newCount} 个</span>
+            </span>
           </div>
-          <button class="zcode-pull-close" id="zcode-modal-close-btn" title="关闭">✕</button>
+          <button class="zcode-pull-close" id="zcode-modal-close-btn" title="关闭" aria-label="关闭">✕</button>
         </div>
         <div class="zcode-pull-body">
           <div class="zcode-pull-toolbar">
@@ -658,7 +856,7 @@
         </div>
         <div class="zcode-pull-footer">
           <div class="zcode-pull-count-info" id="zcode-pull-count-info">
-            已选中 <strong style="color: #2563eb;" id="zcode-selected-num">${newCount}</strong> / ${models.length} 个模型
+            已选中 <strong id="zcode-selected-num">${newCount}</strong> / ${models.length} 个模型
           </div>
           <div class="zcode-pull-footer-btns">
             <button class="zcode-pull-btn-cancel" id="zcode-modal-cancel">取消</button>
@@ -776,7 +974,7 @@
       if (toAdd.length === 0) return;
 
       confirmBtn.disabled = true;
-      confirmBtn.innerHTML = `<span>⏳ 正在保存...</span>`;
+      confirmBtn.innerHTML = `<span>正在保存...</span>`;
 
       try {
         console.log("[ZCode-Model-Puller] 通过 IPC 读取配置文件...");
@@ -1004,9 +1202,11 @@
     pullBtn.setAttribute("title", "根据当前 Base URL 和 API Key 自动拉取所有可用模型");
 
     pullBtn.innerHTML = `
-      <svg class="zcode-pull-bolt-icon" viewBox="0 0 24 24">
-        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-      </svg>
+      <span class="zcode-pull-icon-wrap">
+        <svg class="zcode-pull-bolt-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+        </svg>
+      </span>
       <span>自动拉取模型</span>
     `;
 
@@ -1024,10 +1224,12 @@
 
       pullBtn.classList.add("loading");
       pullBtn.innerHTML = `
-        <svg class="zcode-spin-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;">
-          <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
-          <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
-        </svg>
+        <span class="zcode-pull-icon-wrap">
+          <svg class="zcode-spin-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+            <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+          </svg>
+        </span>
         <span>正在拉取模型...</span>
       `;
 
@@ -1078,9 +1280,11 @@
       } finally {
         pullBtn.classList.remove("loading");
         pullBtn.innerHTML = `
-          <svg class="zcode-pull-bolt-icon" viewBox="0 0 24 24">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-          </svg>
+          <span class="zcode-pull-icon-wrap">
+            <svg class="zcode-pull-bolt-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+          </span>
           <span>自动拉取模型</span>
         `;
       }

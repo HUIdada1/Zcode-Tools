@@ -11,26 +11,27 @@
 | 显示名（marketplace `displayName`） | `ZCode Pilot` |
 | 中文显示名 | `ZCode 工具箱` |
 | 技能目录 | `skills/zcode-pilot/` |
-| 版本 | `0.7.1` |
+| 版本 | `0.8.0` |
 | 仓库名 / 市场名 | 仓库为 `Zcode-Tools`（GitHub：`HUIdada1/Zcode-Tools`），**市场 id 与插件同名 = `zcode-pilot`**：本插件从旧市场里独立出来，配置键为 `zcode-pilot@zcode-pilot` |
 | 图标 | `assets/icon.png` / `assets/banner.png`（由 `tools/make_logo.py` 生成） |
 
 ## 1. 补丁清单（zcode_patcher.py 的 `ALL_PATCH_FLAGS`）
 
-改造后为 7 项（**移除 `thought_slider`，新增 `auto_continue`**）：
+改造后为 6 项（**移除 `thought_slider` 与 `model_width`，新增 `auto_continue`**）：
 
 | 配置键 | CLI 参数 | 源码覆盖参数 | 级别 | 注入载体 |
 | --- | --- | --- | --- | --- |
 | `reasoning_config` | `--reasoning-config` | — | 立即 | provider_config.json |
 | `usage_chart` | `--usage-chart` | — | 立即 | asar 内同长度改字节 |
-| `model_width` | `--model-width` | — | 立即 | asar 内同长度改字节 |
 | `tps_footer` | `--tps-footer` | `--tps-src` | 重打包 | 单脚本注入 |
 | `auto_continue` | `--auto-continue` | `--pilot-src` | 重打包 | 四组件注入（renderer+index+preload+main） |
 | `enhance_prompt` | `--enhance-prompt` | `--enhance-src` | 重打包 | 四组件注入 |
 | `model_puller` | `--model-puller` | `--puller-src` | 重打包 | 四组件注入 |
 | `core_patch` | （无参数，内核补丁） | — | 立即 | zcode.cjs |
 
-`--all` 展开以上除 `core_patch` 外的全部补丁参数（沿用现有 `_expand_all`）。
+`--all` 展开以上除 `core_patch` 外的 6 个补丁参数（沿用现有 `_expand_all`）。
+已下线的 `model_width` 只在 `--all --revert` 时作为 legacy 项展开，用于清理老客户端残留；
+它**不得**回到 `ALL_PATCH_FLAGS`，否则会把用户明确要求去掉的加宽重新打回。
 
 ## 2. 自动继续注入载体（新增）
 
@@ -79,6 +80,7 @@ IPC 通道：  "zcode:pilot-state"
   "settings": {                 // 设置页侧边 tab 写入；默认策略对齐 dsh-client-auto-continue
     "defaultMode": "recover",   // recover | loop
     "resumeSilentTurns": true,
+    "resumeFailedTurns": true,  // TurnError 轮次由渲染层兜底（Stop hook 不会触发）
     "guardTools": true,
     "loopGuard": true,
     "graceMs": 3000,
@@ -204,6 +206,35 @@ IPC 通道：  "zcode:pilot-state"
 * 面板只写 `settings`，**不改插件配置页的 `enabled` 总开关**；总开关仍由插件配置页托管。
 * 输入框开关只写 `sessionMode: {id, mode}`，主进程 handler 落到 `sessions[id].mode`；
   其他会话的 `mode/consecutive` 原样保留。
+
+### 2.3.6 TurnError 兜底（渲染层，2026-11-05 新增）
+
+**结构性事实**：内核 `zcode.cjs` 里 `runStopHooks` 只有**一个**调用点，位于模型循环的
+成功收尾分支（`turnMachine.complete(..., "success")`）。provider 流中断
+（如 `upstream_stream_read_error`）、SSE JSON 解析失败、上游 200 + error 等
+`TurnError` 会直接 emit `TurnError` 并抛错，**不会进入 Stop hook**。
+因此「失败轮次自动继续」必须由渲染层补发；这是官方 hook 的能力盲区，
+不是 hook 判定漏了一条。
+
+检测与执行（`zcode-pilot.js`）：
+
+* 事件流 `row.kind === "turnHeader" && row.state === "failed"` 触发；同一 `turnId`
+  只处理一次（防同轮多次 upsert 连发）；`completedInterrupted` = 用户主动停止，**不接力**。
+* 触发前按序校验（任一不满足即放弃，并在 `__zpilotDiag.failedTurn.reason` 留痕）：
+  `stateReady`/桥存在 → 有 session → `sid === 当前 DOM 会话` → 会话未关/未暂停 →
+  `settings.resumeFailedTurns !== false` → 当前不在流式 → `origin === "userInput"` →
+  `executionKind` 为 `agent`（或缺失）→ 连续次数未达 `maxConsecutive` → 冷却已过。
+* 通过后等 `graceMs`，再用 §2.3.4 同一套五级写回 + `v4-composer-send` 发送
+  `settings.continueTextInterrupted`（默认 #1 `继续`）；1.5s 内无新流式活动则重试，
+  单个 `turnId` 最多 2 次发送尝试。
+* 计数：成功发送后按 `session_id` 记入 `localStorage["zpilot-error-streak"]`
+  （`{count,lastAt}`，不入状态文件，避免与 hook 的 `consecutive` 抢写）；
+  `completedSuccess` 或真人 `userInput`（`origin === "realUser"`）时清零。
+* 用户在这几秒内自己发消息/切会话 → `lastTurnBySid` 变化，兜底自动取消，
+  绝不把「继续」盖到新输入上。
+
+> 该兜底依赖渲染层脚本注入。**Stop hook 本身不依赖 asar**，客户端升级后仍然存活；
+> 失败轮次兜底则必须等插件重新注入（完全退出后由看护写入）后才生效。
 
 
 ## 3. 默认计时与护栏参数（可被 settings 覆盖）

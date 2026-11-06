@@ -269,6 +269,16 @@ const doc = makeDocument();
 const t = buildTree(doc);
 const { sandbox, clock, tick } = boot(doc);
 
+// 样式表体检：花括号必须平衡，且玻璃菜单的关键规则真的写进去了。
+const cssEl = doc.head.children.find((el) => el.id === "zenhance-style");
+const cssText = cssEl ? String(cssEl.textContent || "") : "";
+check(!!cssEl, "应注入 zenhance-style 样式表");
+check((cssText.match(/\{/g) || []).length === (cssText.match(/\}/g) || []).length,
+  "菜单/按钮样式花括号不平衡（CSS 会整段失效）");
+check(cssText.includes("backdrop-filter:blur(24px)"), "右键菜单应使用毛玻璃 backdrop-filter");
+check(cssText.includes("zenhanceMenuIn"), "右键菜单应有入场动画");
+check(!/\bundefined\b/.test(cssText), "样式里不应出现 undefined（变量拼接漏值）");
+
 const BTN = "#zcode-enhance-prompt-btn";
 const btn = () => doc.getElementById("zcode-enhance-prompt-btn");
 const where = (b) => {

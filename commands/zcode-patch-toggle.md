@@ -10,7 +10,6 @@ description: 逐项查看/切换 zcode-pilot 的注入功能开关
 |---|---|---|
 | `reasoning_config` | 思考档位配置（3.14+ 原生 optionSpecs） | ZCode 退出时自动应用，再启动才生效 |
 | `usage_chart` | 用量页去截断 | ZCode 退出时自动应用，再启动才生效 |
-| `model_width` | 模型弹窗加宽 | ZCode 退出时自动应用，再启动才生效 |
 | `tps_footer` | TPS 状态栏 | ZCode 退出时自动应用，再启动才生效 |
 | `auto_continue` | 自动继续 + 循环守卫 | ZCode 退出时自动应用，再启动才生效；输入框开关只影响当前会话；**关闭并保存会全局暂停并作废排队中的继续**；设置页有独立「ZCode Pilot」侧边 tab |
 | `enhance_prompt` | 增强提示词按钮 | ZCode 退出时自动应用，再启动才生效 |
@@ -25,7 +24,7 @@ description: 逐项查看/切换 zcode-pilot 的注入功能开关
    `--reasoning-config --check`（它列出每个模型当前配了几档、来源是 config 还是已在界面手动配置）。
 3. 问用户要改哪个键、改成什么。用户明确指定后再改。
 4. 改配置：**整份读入 → 只增改目标键 → 写回**，保持 JSON 缩进与其余内容不变；`plugins.options` 或插件 id 那一层不存在时按需创建。**不要动 `enabledPlugins` 等其他字段。**
-5. 告诉用户生效时机（见上表）：**8 项都要等 ZCode 退出后由看护写入，再启动才生效**（zcode_patcher.py 在客户端运行时会直接拒绝写入，而会话钩子必然在运行中触发，所以「会话内立即生效」这条路走不通）。
+5. 告诉用户生效时机（见上表）：**7 项都要等 ZCode 退出后由看护写入，再启动才生效**（zcode_patcher.py 在客户端运行时会直接拒绝写入，而会话钩子必然在运行中触发，所以「会话内立即生效」这条路走不通）。
    例外：`auto_continue` 的**运行态**开关写在 `~/.zcode/pilot/state.json`（只写一个小 JSON、不碰 app.asar），会话启动时即刻生效；关闭并保存会写入 `enabled=false`、`paused=true` 并把 `cancelToken` +1 —— **全局暂停并作废已排队的继续**，同时让循环守卫同步失效。
 6. 若用户想立刻生效而不等下次会话，可以按技能里的「标准执行流程」直接执行对应命令（**前提是 ZCode 已完全退出**）。
 
