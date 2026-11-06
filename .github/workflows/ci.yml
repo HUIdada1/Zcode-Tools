@@ -64,15 +64,14 @@ jobs:
           def esc(s):
               return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
           lines = []
-          for p, n in (("logs/stdout.log", 80), ("logs/ci.log", 40), ("ci-report.md", 30)):
+          for p, n in (("logs/stdout.log", 40), ("logs/ci.log", 40), ("ci-report.md", 30)):
               f = pathlib.Path(p)
               if f.is_file():
                   lines.append(f"=== {p} ===")
                   lines.extend(f.read_text(encoding="utf-8", errors="replace").splitlines()[-n:])
           if not lines:
               lines = ["<no log file>"]
-          for ln in lines:
-              print(f"::error title=autopilot-log::{esc(ln)}")
+          print(f"::error title=autopilot-log::{esc(chr(10).join(lines))}")
           PY
 
       # 兼容旧布局：若仓库里还没有 autopilot.py，退回逐项语法检查
