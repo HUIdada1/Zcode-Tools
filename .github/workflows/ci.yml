@@ -41,9 +41,16 @@ jobs:
           node-version: "22"
 
       # 全自动流水线：依赖自检 -> 构建检查 -> 回归测试，产出机器可读报告
+      # Python 统一 UTF-8：Windows runner 默认 cp1252，中文日志会在 print 时直接抛
+      # UnicodeEncodeError（表现为「一条日志都没有、exit 1」）。
       - name: 全自动流水线（autopilot）
         if: hashFiles('autopilot.py') != ''
-        run: python autopilot.py --no-deploy --unattended --report ci-report.md --log logs/ci.log
+        shell: bash
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          python autopilot.py --no-deploy --unattended --report ci-report.md --log logs/ci.log 2>&1 | tee logs/stdout.log
 
       # 公开仓库的 Actions 日志下载需要管理员权限；失败时把关键日志写进
       # job annotation（匿名可读），方便无本地环境时直接定位。
@@ -56,7 +63,7 @@ jobs:
           def esc(s):
               return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
           lines = []
-          for p, n in (("logs/ci.log", 60), ("ci-report.md", 30)):
+          for p, n in (("logs/stdout.log", 80), ("logs/ci.log", 40), ("ci-report.md", 30)):
               f = pathlib.Path(p)
               if f.is_file():
                   lines.append(f"=== {p} ===")
