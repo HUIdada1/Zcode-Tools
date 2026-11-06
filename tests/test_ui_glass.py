@@ -68,6 +68,18 @@ class UiGlassSmoke(unittest.TestCase):
         self.assertIn('btn.setAttribute("aria-label"', body,
                       "去掉 title 后必须保留 aria-label（无障碍）")
 
+    def test_enhance_button_defaults_to_hover_look(self):
+        """按钮默认就要是「悬停态」：常驻绿色玻璃高亮，不必先悬停才看得见。"""
+        src = _read("zcode-enhance-prompt.js")
+        self.assertIn("background:rgba(16,185,129,.12);color:#047857;", src,
+                      "按钮基础样式必须是原悬停态的绿色玻璃高亮")
+        self.assertIn('box-shadow:inset 0 0 0 1px rgba(16,185,129,.22);"', src,
+                      "按钮默认缺少悬停态的内描边")
+        self.assertIn("background:rgba(16,185,129,.18)", src,
+                      "悬停态应在默认高亮上再加深一档（保留交互反馈）")
+        self.assertNotIn("background:transparent;cursor:pointer;", src,
+                         "按钮默认不应再是全透明（即用户反馈的「看不见」）")
+
     def test_enhance_menu_is_glass(self):
         src = _read("zcode-enhance-prompt.js")
         for needle in ("backdrop-filter:blur(24px)", "zenhance-menu-foot",

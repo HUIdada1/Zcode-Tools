@@ -347,7 +347,7 @@ check(doc.querySelectorAll(BTN).length === 1, "幂等：按钮只应有一个");
 
 // 诊断字段
 const d = sandbox.__zenhanceDiag || {};
-check(d.scriptVersion === "1.9", "diag.scriptVersion 应为 1.9，实际=" + d.scriptVersion);
+check(d.scriptVersion === "1.10", "diag.scriptVersion 应为 1.10，实际=" + d.scriptVersion);
 check(d.buttonAttached === true, "diag.buttonAttached 应为 true");
 check(d.mountWhere === "prepend", "diag.mountWhere 应为 prepend，实际=" + d.mountWhere);
 

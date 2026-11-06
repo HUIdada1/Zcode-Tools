@@ -22,9 +22,14 @@
  *
  * 数据口径（全部来自官方事件，不做臆造）：
  *   - 轮数/步数：DOM 可见轮次；步数 = 该轮完成的模型请求数（usage.delta 去重计数）。
- *   - 模型用时/工具调用用时：turnHeader.modelDurationMs / toolDurationMs 的会话累计。
+ *   - 模型用时/工具调用用时：优先取 turnHeader.modelDurationMs / toolDurationMs 的会话累计；
+ *     官方字段缺失时（长工具链轮次、部分客户端版本不会下发）用本地事件时间戳兜底：
+ *       genMs     = 连续吐字区间累计（相邻 stream.chunk 间隔 ≤4s 的部分才算模型生成）；
+ *       toolWaitMs = 上一次 usage.delta 到下一次开始吐字之间的等待（工具执行/排队）。
+ *     兜底值在明细面板里带「≈」前缀，与官方精确值区分。
  *   - 首 token 平均：各轮 (首个 stream.chunk − 本轮开始) 的算术平均。
- *   - 输出速度：已完成轮的精确输出 token ÷ 精确模型生成时长；无完成轮时退回本轮实时速度。
+ *   - 输出速度：已完成轮的精确输出 token ÷ 精确模型生成时长；官方时长缺失时用 genMs；
+ *     流式中优先 4s 滑动窗口，窗口不足时退回本轮平均，静默期保持最近一次速度。
  *   - Token 用量：inputTokens（含缓存读取）+ outputTokens；缓存命中 = cacheRead ÷ inputTokens；
  *     未缓存输入 = inputTokens − cacheReadTokens。
  *
@@ -278,6 +283,9 @@
       startedAt: null, endedAt: null, activeMs: null, modelDurationMs: null,
       toolDurationMs: null, otherDurationMs: null,
       firstChunkAt: null, rowFirstAt: null, lastUsageAt: null,
+      // 官方时长缺失时的本地兜底：genMs = 连续吐字区间累计（模型生成），
+      // toolWaitMs = 上一次请求结束到下一次开始吐字之间的等待（工具执行/排队，偏保守）。
+      genMs: 0, toolWaitMs: 0, lastChunkAt: null, waitFrom: null,
       outputTokens: 0, inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 0,
       requestCount: 0, reqIds: new Set(),
       textTok: 0, win: [], modelId: null, streaming: false,
@@ -290,10 +298,17 @@
     t.endedAt = null; t.activeMs = null; t.modelDurationMs = null;
     t.toolDurationMs = null; t.otherDurationMs = null;
     t.firstChunkAt = null; t.rowFirstAt = null; t.lastUsageAt = null;
+    t.genMs = 0; t.toolWaitMs = 0; t.lastChunkAt = null; t.waitFrom = null;
     t.outputTokens = 0; t.inputTokens = 0; t.cacheReadTokens = 0; t.cacheWriteTokens = 0; t.reasoningTokens = 0; t.totalTokens = 0;
     t.requestCount = 0; t.reqIds = new Set();
     t.textTok = 0; t.win = []; t.lastTps = null; t.streaming = true;
   }
+
+  // 本地时长估算的阈值（口径见文件头「数据口径」）：
+  //  * 两段吐字间隔 ≤ GEN_GAP_MS 视为同一段模型生成（连续吐字）；
+  //  * 工具/排队等待短于 TOOL_MIN_MS 不计（usage 与下一块几乎同时到达，多数是抖动）。
+  const GEN_GAP_MS = 4000;
+  const TOOL_MIN_MS = 200;
 
   // token 粗估：CJK 字符 1 字 ≈ 1 token，其余 4 字符 ≈ 1 token
   const estTok = (s) => {
@@ -385,6 +400,8 @@
       }
       t.sessionId = ev.sessionId || t.sessionId;
       t.lastUsageAt = ev.occurredAt ?? t.lastUsageAt;
+      // 一个模型请求结束 → 到下一个请求开始吐字之前的空档，估算为工具执行/排队用时。
+      t.waitFrom = ev.occurredAt ?? Date.now();
       if (t.firstChunkAt == null && firstChunkByScid[scid] != null) {
         t.firstChunkAt = firstChunkByScid[scid];
       }
@@ -401,7 +418,24 @@
       if (t.firstChunkAt == null) t.firstChunkAt = firstChunkByScid[scid];
       t.sessionId = ev.sessionId || t.sessionId;
       t.streaming = true;   // turnHeader 未到时也标记生成中
-      pushWin(t, ev.occurredAt || Date.now(), t.textTok);   // 心跳采样，保证窗口时间轴连续
+
+      // ★ 本地计时兜底：官方 modelDurationMs / toolDurationMs 并非所有客户端版本、
+      //   所有轮次都会下发（长工具链的轮次尤其常见只有 usage 没有 header 时长）。
+      //   用吐字间隔累计「模型生成时长」，用「上一次请求结束 → 本次首块」累计工具等待，
+      //   保证 107 步的长轮也不会在面板里全是「—」。
+      const at = Number(ev.occurredAt) || Date.now();
+      if (t.lastChunkAt != null) {
+        const dt = at - t.lastChunkAt;
+        if (dt > 0 && dt <= GEN_GAP_MS) t.genMs += dt;
+      }
+      if (t.waitFrom != null) {
+        const wait = at - t.waitFrom;
+        if (wait >= TOOL_MIN_MS) t.toolWaitMs += wait;
+        t.waitFrom = null;
+      }
+      t.lastChunkAt = at;
+
+      pushWin(t, at, t.textTok);   // 心跳采样，保证窗口时间轴连续
     }
   }
 
@@ -485,11 +519,17 @@
         const dtok = win[win.length - 1][1] - win[0][1];
         if (dt >= 1 && dtok > 0) tps = dtok / dt;
       }
+      // 实时窗口不够（刚起步 / 工具链路较长）→ 用本地累计生成时长给平均速度，
+      // 避免长轮次在静默期只能显示「—」。
+      if (tps == null && t.genMs > 800 && out > 0) tps = out / (t.genMs / 1000);
       if (tps == null && t.lastTps != null) tps = t.lastTps;   // 工具执行等静默期：保持最近速度
     } else {
       // 优先使用官方下发的精确 modelDurationMs 校准全轮纯模型生成速率
       if (t.modelDurationMs != null && t.modelDurationMs > 500 && t.outputTokens > 0) {
         tps = t.outputTokens / (t.modelDurationMs / 1000);
+      } else if (t.genMs > 800 && out > 0) {
+        // 官方没给时长（长工具链轮次常见）→ 本地累计生成时长兜底
+        tps = out / (t.genMs / 1000);
       } else {
         const decodeFrom = firstAt ?? t.startedAt;
         const decodeMs = decodeFrom != null && t.lastUsageAt != null ? t.lastUsageAt - decodeFrom : null;
@@ -501,6 +541,9 @@
     return {
       ttft, tps, out, reasoning,
       streaming: t.streaming,
+      // 官方时长缺失、用了本地估算时标记出来（面板显示「≈」）
+      modelApprox: !(t.modelDurationMs != null && t.modelDurationMs > 0) && t.genMs > 0,
+      toolApprox: !(t.toolDurationMs != null && t.toolDurationMs > 0) && t.toolWaitMs > 0,
     };
   }
 
@@ -582,7 +625,7 @@
   let diag = null;
   try {
     diag = window.__ztpsDiag = window.__ztpsDiag || {};
-    diag.scriptVersion = "3.17-pilot-ui-3";
+    diag.scriptVersion = "3.17-pilot-ui-4";
     diag.loadedAt = new Date().toISOString();
   } catch (err) { /* ignore */ }
 
@@ -630,6 +673,9 @@
         display: "flex", justifyContent: "center",
         alignItems: "center",
         marginTop: "3px", padding: "0",
+        // 视觉下移：composer 容器底部还有一段内边距，状态条看起来「悬空」离窗口底太远。
+        // 用 transform 而非 margin —— 不参与父容器高度计算，不会把输入框整体顶上去。
+        transform: "translateY(6px)",
         alignSelf: "stretch",          // 与 composer 卡片同宽
         pointerEvents: "auto",
       });
@@ -718,6 +764,8 @@
       const agg = {
         rounds: 0, steps: 0, input: 0, cache: 0, cacheWrite: 0, reasoning: 0, output: 0,
         modelMs: 0, modelOut: 0, toolMs: 0, ttftSum: 0, ttftCount: 0,
+        // 官方时长缺失、用了本地估算 → 面板显示「≈」
+        modelApprox: false, toolApprox: false,
       };
       let latest = null;
       for (const t of turns.values()) {
@@ -732,24 +780,37 @@
         agg.reasoning += t.reasoningTokens || 0;
         // 流式中 usage 未到的轮以内容估算兜底,精确值到达后自然覆盖
         agg.output += Math.max(t.outputTokens || 0, t.streaming ? (t.textTok || 0) : 0);
-        // 速度只用「已完成且官方给了精确模型时长」的轮，避免把工具等待算进生成速度
-        if (t.modelDurationMs != null && t.modelDurationMs > 0) {
-          agg.modelMs += t.modelDurationMs;
+        // 速度优先用「已完成且官方给了精确模型时长」的轮；官方没给时退回本地累计生成时长
+        // （长工具链轮次经常只有 usage、没有 header 时长，否则整轮 TPS 永远是空的）。
+        const modelMs = (t.modelDurationMs != null && t.modelDurationMs > 0)
+          ? t.modelDurationMs : (t.genMs || 0);
+        if (modelMs > 0) {
+          agg.modelMs += modelMs;
           agg.modelOut += t.outputTokens || 0;
+          if (!(t.modelDurationMs != null && t.modelDurationMs > 0)) agg.modelApprox = true;
         }
-        agg.toolMs += t.toolDurationMs || 0;
+        const toolMs = (t.toolDurationMs != null && t.toolDurationMs > 0)
+          ? t.toolDurationMs : (t.toolWaitMs || 0);
+        if (toolMs > 0) {
+          agg.toolMs += toolMs;
+          if (!(t.toolDurationMs != null && t.toolDurationMs > 0)) agg.toolApprox = true;
+        }
         const firstAt = t.firstChunkAt ?? t.rowFirstAt;
         const ttft = firstAt != null && t.startedAt != null ? firstAt - t.startedAt : null;
         if (ttft != null && ttft >= 0) { agg.ttftSum += ttft; agg.ttftCount++; }
         if (!latest || (t.startedAt ?? 0) > (latest.startedAt ?? 0)) latest = t;
       }
-      // 会话级输出速度：Σ精确输出 ÷ Σ精确模型时长；还没有完成轮时退回本轮实时速度
+      // 会话级输出速度：流式中优先本轮实时窗口（反应最快）；否则用已完成轮的精确口径
+      // （官方 modelDurationMs 优先，缺失时退回本地累计生成时长 genMs）。
+      // 这里只算一次 statsOf：它同时维护 lastTps（静默期保持最近速度）。
+      const live = latest ? statsOf(latest) : null;
       let tps = null;
-      if (agg.modelMs > 500 && agg.modelOut > 0) {
+      if (latest && latest.streaming && live && live.tps != null) {
+        tps = live.tps;
+      } else if (agg.modelMs > 500 && agg.modelOut > 0) {
         tps = agg.modelOut / (agg.modelMs / 1000);
-      } else if (latest) {
-        const live = statsOf(latest);
-        if (live.tps != null) tps = live.tps;
+      } else if (live && live.tps != null) {
+        tps = live.tps;
       }
       let host = document.querySelector("[" + MARK + "-bar]");
       if (diag) {
@@ -789,7 +850,7 @@
       }
       const statsChip = host.querySelector("[data-ztps-chip='stats']");
       const tokensChip = host.querySelector("[data-ztps-chip='tokens']");
-      const s = latest ? statsOf(latest) : null;
+      const s = live;   // 上面已算过（同一次渲染内复用，避免重复结算 lastTps）
       const streaming = !!(s && s.streaming);
       const totalTok = (agg.input || 0) + (agg.output || 0);
       const hitPct = agg.input > 0 ? (agg.cache / agg.input) * 100 : null;
@@ -942,7 +1003,8 @@
     if (!v) return "";
     const a = v.agg;
     if (kind === "tokens") return ["t", a.input, a.output, a.cache].join("|");
-    return ["s", a.modelMs, a.toolMs, a.ttftSum, a.ttftCount,
+    return ["s", a.modelMs, a.modelApprox ? "≈" : "", a.toolMs, a.toolApprox ? "≈" : "",
+            a.ttftSum, a.ttftCount,
             v.tps == null ? "" : Math.round(v.tps)].join("|");
   }
 
@@ -975,8 +1037,11 @@
     popEl.appendChild(popHeader("lat", "会话统计", null));
     const g = document.createElement("div");
     const avgTtft = agg.ttftCount > 0 ? agg.ttftSum / agg.ttftCount : null;
-    popRow(g, "模型用时", agg.modelMs > 0 ? fmtSpanCN(agg.modelMs) : "—");
-    popRow(g, "工具调用用时", agg.toolMs > 0 ? fmtSpanCN(agg.toolMs) : "—");
+    // 官方没下发精确时长时用本地累计值兜底，前缀「≈」明示是估算口径。
+    popRow(g, "模型用时", agg.modelMs > 0
+      ? (agg.modelApprox ? "≈" : "") + fmtSpanCN(agg.modelMs) : "—");
+    popRow(g, "工具调用用时", agg.toolMs > 0
+      ? (agg.toolApprox ? "≈" : "") + fmtSpanCN(agg.toolMs) : "—");
     popRow(g, "首 token 平均（TTFT）", avgTtft != null ? fmtLatCN(avgTtft) : "—");
     popRow(g, "输出速度（TPS）", lastView.tps != null ? `${fmtTps(lastView.tps)} tok/s` : "—");
     popEl.appendChild(g);

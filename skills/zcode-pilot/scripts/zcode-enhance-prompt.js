@@ -45,7 +45,7 @@
   const MENU_ID = "zenhance-model-menu";
   const STYLE_ID = "zenhance-style";
   const diag = (window.__zenhanceDiag = window.__zenhanceDiag || {});
-  diag.scriptVersion = "1.9";
+  diag.scriptVersion = "1.10";
 
   const TIP_IDLE = "增强提示词（右键选择模型）";
   const TIP_BUSY = "增强中…";
@@ -85,13 +85,24 @@
       const st = document.createElement("style");
       st.id = STYLE_ID;
       st.textContent = [
-        // —— 触发按钮：无原生 title 提示；悬浮只给玻璃绿高亮 ——
+        // —— 触发按钮：无原生 title 提示；**默认就呈现绿色玻璃高亮**（= 旧版悬停态），
+        //    按钮常驻可见，用户不必先悬停才知道「这里能润色」；悬停在此基础上再加深一档。
         "#" + BTN_ID + "{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;",
-        "padding:0;border-radius:9px;border:0.5px solid transparent;background:transparent;cursor:pointer;",
-        "color:var(--color-foreground-subtle,#5b6470);",
+        "padding:0;border-radius:9px;border:0.5px solid transparent;cursor:pointer;",
+        "background:rgba(16,185,129,.12);color:#047857;",
+        "box-shadow:inset 0 0 0 1px rgba(16,185,129,.22);",
         "transition:background .22s cubic-bezier(.22,1,.36,1),color .22s cubic-bezier(.22,1,.36,1),box-shadow .22s cubic-bezier(.22,1,.36,1),transform .22s cubic-bezier(.22,1,.36,1)}",
-        "#" + BTN_ID + ":hover{background:rgba(16,185,129,.12);color:#047857;",
-        "box-shadow:inset 0 0 0 1px rgba(16,185,129,.22);transform:translateY(-1px)}",
+        "#" + BTN_ID + ":hover{background:rgba(16,185,129,.18);color:#065f46;",
+        "box-shadow:inset 0 0 0 1px rgba(16,185,129,.32),0 2px 8px rgba(16,185,129,.14);transform:translateY(-1px)}",
+        ".dark #" + BTN_ID + ",html.dark #" + BTN_ID + ",body.dark #" + BTN_ID + "{",
+        "background:rgba(52,211,153,.14);color:#6ee7b7;box-shadow:inset 0 0 0 1px rgba(52,211,153,.26)}",
+        ".dark #" + BTN_ID + ":hover,html.dark #" + BTN_ID + ":hover,body.dark #" + BTN_ID + ":hover{",
+        "background:rgba(52,211,153,.20);color:#a7f3d0;box-shadow:inset 0 0 0 1px rgba(52,211,153,.36)}",
+        "@media (prefers-color-scheme:dark){",
+        ":root:not(.light):not([data-theme='light']) #" + BTN_ID + "{",
+        "background:rgba(52,211,153,.14);color:#6ee7b7;box-shadow:inset 0 0 0 1px rgba(52,211,153,.26)}",
+        ":root:not(.light):not([data-theme='light']) #" + BTN_ID + ":hover{",
+        "background:rgba(52,211,153,.20);color:#a7f3d0;box-shadow:inset 0 0 0 1px rgba(52,211,153,.36)}}",
         "#" + BTN_ID + ":active{transform:translateY(0) scale(.98)}",
         "#" + BTN_ID + ":focus-visible{outline:2px solid rgba(16,185,129,.55);outline-offset:2px}",
         "#" + BTN_ID + "[disabled]{opacity:.55;cursor:default}",

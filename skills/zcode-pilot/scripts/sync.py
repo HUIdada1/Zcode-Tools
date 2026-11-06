@@ -66,6 +66,18 @@ MARKER = HERE / "_autoinject.done"
 # 客户端指纹记录：用来检测「ZCode 客户端是否刚升级过」
 CLIENT_FINGERPRINT = HERE / "_client_fingerprint.json"
 
+# ---------- 看护状态与「注入版本」记录（都必须跨插件版本目录共享） ----------
+# 市场更新会换一个版本目录（.../zcode-pilot/0.8.0 → .../0.9.0），旧目录里写的东西
+# 新版本读不到。所以看护的单例文件、以及「app.asar 当前注入的是哪个插件版本」的记账，
+# 一律放在 ~/.zcode/pilot/ 下 —— 这是升级后还能自动重注入的关键。
+WATCHDOG_DIR = PILOT_DIR
+WANT_FILE = WATCHDOG_DIR / "watchdog.want"
+PID_FILE = WATCHDOG_DIR / "watchdog.pid"
+WATCH_FLAG = WATCHDOG_DIR / "watchdog.watch"
+INJECT_RECORD = WATCHDOG_DIR / "injected.json"
+# 市场安装登记表：插件市场在「更新」完成的瞬间就会改写它（比插件目录里的清单更及时）。
+INSTALLED_PLUGINS = Path.home() / ".zcode" / "cli" / "plugins" / "installed_plugins.json"
+
 # 配置键 -> (zcode_patcher.py 参数, 是否重打包级)
 #
 # **关于「立即写」这条路**：zcode_patcher.py 的运行预检是**全局**的 —— `zcode_running()`
@@ -277,9 +289,111 @@ def _plugin_boundary() -> list[Path]:
     return out
 
 
+# ---------- 插件版本 / 市场安装位置 ----------
+def _plugin_root() -> Path | None:
+    """本插件的根目录（放着 `.zcode-plugin/plugin.json` 的那一层）。"""
+    for base in _plugin_boundary():
+        for rel in (".zcode-plugin/plugin.json", ".claude-plugin/plugin.json"):
+            p = base / rel
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if _is_our_key(data.get("name")):
+                return base
+    return None
+
+
+def plugin_version() -> str:
+    """本插件目录声明的版本号（读不到返回空串）。"""
+    root = _plugin_root()
+    if not root:
+        return ""
+    for rel in (".zcode-plugin/plugin.json", ".claude-plugin/plugin.json"):
+        try:
+            data = json.loads((root / rel).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if data.get("version"):
+            return str(data["version"])
+    return ""
+
+
+def installed_plugin() -> dict:
+    """市场登记表里本插件的当前安装：`{version, root}`；读不到返回 `{}`。
+
+    为什么不用「自己所在的版本目录」判断：市场更新后，**正在运行的客户端**仍在用旧
+    版本目录里的钩子，而登记表已经指向新目录。拿登记表当基准才能第一时间发现升级。
+    """
+    try:
+        data = json.loads(INSTALLED_PLUGINS.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    for ent in data.get("plugins") or []:
+        if not isinstance(ent, dict):
+            continue
+        name = str(ent.get("id") or "").split("@")[0] or str(ent.get("name") or "")
+        if not _is_our_key(name):
+            continue
+        root = ent.get("installPath")
+        if root and Path(root).is_dir():
+            return {"version": str(ent.get("version") or ""),
+                    "root": str(Path(root).resolve())}
+    return {}
+
+
+def read_inject_record() -> dict:
+    try:
+        return json.loads(INJECT_RECORD.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def write_inject_record(version: str = "", root: str = "") -> None:
+    """记录「app.asar 里当前注入的是哪个插件版本」，供下次市场更新时判断。
+
+    只在**本目录就是市场安装的当前版本目录**时才记账：从仓库/绿色目录里手工跑
+    sync（开发调试）不应污染这条记录，否则会把自己的开发目录误判成一次「升级」。
+    """
+    root = root or (str(_plugin_root()) if _plugin_root() else "")
+    version = version or plugin_version()
+    if not version or not root:
+        return
+    cur = installed_plugin()
+    try:
+        if not cur or Path(cur["root"]).resolve() != Path(root).resolve():
+            return
+    except Exception:
+        return
+    try:
+        WATCHDOG_DIR.mkdir(parents=True, exist_ok=True)
+        INJECT_RECORD.write_text(json.dumps({
+            "pluginVersion": version,
+            "pluginRoot": str(Path(root).resolve()),
+            "recordedAt": datetime.now().astimezone().isoformat(timespec="seconds"),
+        }, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def plugin_update_pending() -> dict:
+    """市场是否装了比「当前注入版本」更新的插件。没有则返回 `{}`。
+
+    返回 `{version, root, from}` —— `root` 是**新版插件目录**。重注入必须用它的脚本，
+    绝不能用当前（旧版）目录里的，否则注进去的仍是旧实现。
+    """
+    cur = installed_plugin()
+    rec = read_inject_record()
+    if not cur or not rec:
+        return {}
+    old = str(rec.get("pluginVersion") or "")
+    if cur["version"] and old and cur["version"] != old:
+        return {**cur, "from": old}
+    return {}
+
+
 def read_options():
-    """读本插件的开关值。返回 (options, source)；source 为 None 表示没找到配置。"""
-    # 宿主若把插件配置注入 hook 环境，优先用环境变量。
+    """读本插件的开关值。返回 (options, source)；source 为 None 表示没找到配置。"""    # 宿主若把插件配置注入 hook 环境，优先用环境变量。
     # 键名必须 `.lower()` 归一：Windows 上 os.environ 会把键名**转成大写**
     # （CPython 对 nt 的实现就是「Env Var Names Must Be UPPERCASE」），
     # 于是 ZCODE_PLUGIN_CONFIG_reasoning_config 读出来是 REASONING_CONFIG，
@@ -509,22 +623,36 @@ def legacy_cleanup_needed() -> bool:
 
 
 def start_watchdog(wanted: dict) -> None:
-    """启动退出后看护：等 ZCode 退出 → 应用重打包级补丁。"""
+    """启动退出后看护：等 ZCode 退出 → 应用重打包级补丁；顺带盯紧插件市场更新。
+
+    **为什么即使用不上补丁也要拉起（watch 模式）**：市场「更新」只替换插件目录，
+    不会重新注入 app.asar；而更新发生在会话中途，此刻没有任何钩子会被再次触发。
+    只有提前常驻的看护能在客户端退出的一瞬间发现「版本目录已经换了」，并直接用
+    **新版目录的脚本**重写注入 —— 用户更新完照常退出一次即可，无需再退第二次。
+    
+    非市场安装（开发目录 / 绿色版）没有「版本目录」可换，就没有常驻的必要。
+    """
     # 过滤掉 reasoning_config 关闭项（不托管语义，绝不调度看护）
     wanted = {k: v for k, v in wanted.items() if not (k == "reasoning_config" and not v)}
-    if not wanted:
+    market = installed_plugin()
+    if not wanted and not market:
         return
-    want_file = HERE / "_watchdog.want"
-    pid_file = HERE / "_watchdog.pid"
+    pid_file = PID_FILE
     try:
+        WATCHDOG_DIR.mkdir(parents=True, exist_ok=True)
         cur_wants = {}
-        if want_file.is_file():
+        if WANT_FILE.is_file():
             try:
-                cur_wants = json.loads(want_file.read_text(encoding="utf-8"))
+                cur_wants = json.loads(WANT_FILE.read_text(encoding="utf-8"))
             except Exception:
                 cur_wants = {}
         cur_wants.update(wanted)
-        want_file.write_text(json.dumps(cur_wants, ensure_ascii=False), encoding="utf-8")
+        if cur_wants:
+            WANT_FILE.write_text(json.dumps(cur_wants, ensure_ascii=False), encoding="utf-8")
+        else:
+            WANT_FILE.unlink(missing_ok=True)
+        # 常驻开关：看护据此判断「即使没有待办，也要等到退出并检查插件版本」
+        WATCH_FLAG.write_text(str(market.get("version") or ""), encoding="utf-8")
     except Exception:
         pass
 
@@ -538,7 +666,8 @@ def start_watchdog(wanted: dict) -> None:
         except Exception:
             pass
 
-    args = [f"--want={k}={'on' if v else 'off'}" for k, v in wanted.items()]
+    args = ["--watch-plugin-update"]
+    args += [f"--want={k}={'on' if v else 'off'}" for k, v in wanted.items()]
     kw = {"cwd": str(HERE), "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
     if os.name == "nt":
         kw["creationflags"] = DETACHED_PROCESS | CREATE_NO_WINDOW
@@ -575,11 +704,14 @@ def resolve_wanted() -> tuple[dict, str]:
     return merged, source
 
 
-def run_sync(echo: bool = False) -> str:
+def run_sync(echo: bool = False, inline_repack: bool = False, watch: bool = True) -> str:
     """真正干活的同步逻辑。返回一句话结论（同时写进日志与心跳）。
 
     echo=False 时**不往 stdout 写任何东西**：钩子的 stdout 会被按 JSON schema 严格校验，
     输出非 JSON 会被判为「钩子运行失败」（虽然脚本副作用已经生效，但日志里会留下假故障）。
+
+    inline_repack=True 是「客户端已退出」场景（看护在插件升级后调用）：重打包级补丁
+    当场写入，不再转交看护。watch=False 时也不拉起新的看护（我们就在看护里）。
     """
     wanted, origin = resolve_wanted()
     if not wanted:
@@ -587,7 +719,8 @@ def run_sync(echo: bool = False) -> str:
         # 这条清理与开关无关（功能已在 0.7.0 移除），不能因为早退就永远清不掉。
         if legacy_cleanup_needed():
             log("检测到历史「思考强度滑条」注入残留 → 已排入 ZCode 退出后清理（开关不可解析）")
-            start_watchdog({LEGACY_CLEANUP_KEY: True})
+            if watch:
+                start_watchdog({LEGACY_CLEANUP_KEY: True})
             return "既没有已保存的开关，也读不到插件清单默认值 → 仅安排清理历史「思考强度滑条」残留"
         return "既没有已保存的开关，也读不到插件清单默认值 → 未做任何操作"
 
@@ -628,7 +761,7 @@ def run_sync(echo: bool = False) -> str:
                 else:
                     failed.append(f"{key}(执行失败)")
                 continue
-            if repack:
+            if repack and not inline_repack:
                 deferred[key] = want
                 refreshed.append(key)
                 continue
@@ -647,7 +780,7 @@ def run_sync(echo: bool = False) -> str:
             need_revert = True
         else:
             continue  # 已一致
-        if repack:
+        if repack and not inline_repack:
             deferred[key] = want
             continue
         verdict = run_patcher(args, revert=need_revert)
@@ -676,8 +809,15 @@ def run_sync(echo: bool = False) -> str:
         except Exception as exc:  # 检测失败不影响其它补丁
             log(f"模型弹窗加宽残留检测失败（忽略）: {type(exc).__name__}: {exc}")
 
-    if deferred:
+    # 常驻看护（watch=True）：即使这次没有待办也要拉起 —— 它是「市场更新后自动
+    # 重新注入」的唯一触发点（更新发生在会话中途，客户端退出时不会再有钩子）。
+    if watch:
         start_watchdog(deferred)
+
+    # 记账：所有重打包级补丁都与当前脚本一致（没有待办/失败）→ 记下注入版本，
+    # 下次市场更新时就能据此判断「注入内容已经旧了」。
+    if not failed and not any(k in deferred for k, _a, rep in PATCHES if rep):
+        write_inject_record()
 
     parts = []
     if changed:
@@ -791,8 +931,9 @@ def first_auto_inject() -> bool:
 NOTICE_HEAD = "ZCode Pilot 已自动接管本地补丁注入（无需手动配置）"
 
 
-def build_notice(is_upgrade: bool = False, version: str = "") -> str:
-    """自动注入时注入会话的说明（区分首次安装与客户端升级）。"""
+def build_notice(is_upgrade: bool = False, version: str = "",
+                 plugin_version: str = "") -> str:
+    """自动注入时注入会话的说明（区分首次安装、客户端升级、插件市场更新）。"""
     doctor = HERE / "doctor.py"
     ver_tag = f"至 v{version} " if version else ""
     if is_upgrade:
@@ -802,6 +943,13 @@ def build_notice(is_upgrade: bool = False, version: str = "") -> str:
             "  写入完成后看护会自动重启 ZCode，下次启动即可重新恢复全部增强功能！\n"
             "· 随时可运行自检核对当前各补丁状态（只读）：\n"
             f'    python "{doctor}"'
+        )
+    if plugin_version:
+        return (
+            f"检测到插件已从市场更新至 v{plugin_version}。新版注入脚本会在你**完全退出 ZCode**"
+            "（托盘图标右键 → 退出）时由后台看护自动重写，退出后看护会自动重新拉起客户端，"
+            "**无需任何手动操作，也不必再退第二次**。\n"
+            f'想看当前状态可运行（只读，可选）：\n    python "{doctor}"'
         )
     return (
         f"{NOTICE_HEAD}。本次会话启动时已在后台开始同步：\n"
@@ -816,10 +964,11 @@ def build_notice(is_upgrade: bool = False, version: str = "") -> str:
     )
 
 
-def emit_notice(is_upgrade: bool = False, version: str = "") -> None:
+def emit_notice(is_upgrade: bool = False, version: str = "", plugin_version: str = "") -> None:
     """往会话里注入一条说明，让「自动注入到底做没做」看得见。"""
     try:
-        print(json.dumps({"additionalContext": build_notice(is_upgrade, version)}, ensure_ascii=False))
+        print(json.dumps({"additionalContext": build_notice(is_upgrade, version, plugin_version)},
+                         ensure_ascii=False))
     except Exception as exc:
         log(f"提示输出失败: {exc!r}")
 
@@ -827,6 +976,13 @@ def emit_notice(is_upgrade: bool = False, version: str = "") -> None:
 def main() -> None:
     """入口分流：钩子只负责「登记心跳 + 后台化」，干活交给 --worker 子进程。"""
     argv = sys.argv[1:]
+
+    if "--apply-now" in argv:
+        # 看护在客户端**已退出**后调用（插件市场更新后的重注入）：重打包级补丁当场写入，
+        # 也不再拉起看护。成功后写注入版本记录，供看护确认「新版本已经落地」。
+        beat("插件更新后重注入")
+        beat(run_sync(echo=False, inline_repack=True, watch=False))
+        return
 
     if "--worker" in argv:
         beat("后台同步已启动")
@@ -837,8 +993,10 @@ def main() -> None:
         # 钩子模式：先留下心跳（哪怕后台起不来也证明钩子跑过），再立刻返回
         beat("已启动（后台同步）")
         notify, is_up, ver = detect_upgrade_or_first_run()
-        if notify:
-            emit_notice(is_upgrade=is_up, version=ver)
+        pending = plugin_update_pending()
+        if notify or pending:
+            emit_notice(is_upgrade=is_up, version=ver,
+                        plugin_version="" if is_up else str(pending.get("version") or ""))
         if not spawn_detached(["--worker", "--from-hook"]):
             beat(run_sync(echo=False))  # 兜底：后台起不来就前台做完
         return

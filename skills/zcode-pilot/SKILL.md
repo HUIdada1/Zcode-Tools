@@ -584,7 +584,7 @@ python zcode_patcher.py --model-width --revert   # 从 sidecar 还原（完全�
 
 - **左框（性能）** = 会话轮数 + 步数 + 会话输出速度。步数 = 当前可见轮次已完成的模型请求数（`usage.delta` 按 `requestId` 去重）；速度 = Σ已完成轮精确输出 ÷ Σ`turnHeader.modelDurationMs`，还没有完成轮时退回本轮实时速度。
 - **右框（用量）** = 会话总 Token（`inputTokens + outputTokens`）+ 缓存命中率（`cacheReadTokens ÷ inputTokens`，整数百分比，如 97%）。
-- **点击左框** → 「会话统计」面板：模型用时（Σ`modelDurationMs`）、工具调用用时（Σ`toolDurationMs`）、首 token 平均（各轮 TTFT 算术平均）、输出速度（TPS）。
+- **点击左框** → 「会话统计」面板：模型用时（Σ`modelDurationMs`）、工具调用用时（Σ`toolDurationMs`）、首 token 平均（各轮 TTFT 算术平均）、输出速度（TPS）。官方字段缺失时（长工具链轮次、部分客户端版本不下发）改用本地事件时间戳兜底：`genMs` = 连续吐字区间累计、`toolWaitMs` = 上一请求结束到下一次开始吐字的等待，面板上以「≈」标注估算值；TPS 也会退回 `genMs` 口径，避免整屏「—」。
 - **点击右框** → 「Token 用量」面板：缓存命中、未缓存输入（`inputTokens − cacheReadTokens`）、缓存读取、输出，全部为千分位全量数字（如 20,026,706 tok）。
 - **面板行为**：锚定所点框、优先向下展开（下方放不下才翻到框上方）；点击框外或按 Esc 收起；数据刷新时按内容签名增量重绘。
 

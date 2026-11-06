@@ -840,8 +840,11 @@ def auto_fix() -> int:
         except Exception as e:
             print(f"{BAD} 修复配置失败 {cfg_path}：{e}")
 
-    # 2. 清理陈旧看护锁
-    pid_file = HERE / "_watchdog.pid"
+    # 2. 清理陈旧看护锁（0.8.1 起锁文件跨插件版本目录共享，见 sync.PID_FILE）
+    try:
+        from apply_after_exit import PID_FILE as pid_file
+    except Exception:
+        pid_file = HERE / "_watchdog.pid"
     if pid_file.is_file():
         try:
             pid = int(pid_file.read_text(encoding="utf-8").strip())

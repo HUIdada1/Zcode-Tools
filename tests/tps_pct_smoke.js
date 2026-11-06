@@ -163,9 +163,16 @@ check(/\.ztps-chip-sub\{color:var\(--ztps-green-soft\)/.test(src), "左/右次�
 check(/fmtTok\(totalTok\)[\s\S]{0,160}\{ dot: true \}/.test(src),
   "右侧 Token 框没有和左侧一样的状态点");
 check(/marginTop: "3px"/.test(src), "底部边距应从 6px 减半到 3px");
+check(/transform: "translateY\(6px\)"/.test(src),
+  "状态条应整体下移 6px（贴住窗口底部，不要悬空）");
 check(/backdrop-filter:blur\(24px\)/.test(src), "明细面板缺少毛玻璃 backdrop-filter");
 check(/POP_AUTO_CLOSE_MS/.test(src) && /armPopTimer/.test(src),
   "明细面板缺少无操作自动收起");
+// 官方 turnHeader 时长缺失时的本地兜底：长轮次不能整屏「—」
+check(/genMs/.test(src) && /toolWaitMs/.test(src),
+  "缺少模型/工具用时的本地计时兜底（genMs / toolWaitMs）");
+check(/modelApprox/.test(src) && /"≈"/.test(src),
+  "估算口径必须在面板上用「≈」标注");
 check(/visibilitychange/.test(src), "页面隐藏时明细面板应收起");
 check(!/\[role='menu'\]\.w-48/.test(src) && !/width:20rem!important/.test(src),
   "模型弹窗加宽覆盖仍残留在 TPS 样式里");

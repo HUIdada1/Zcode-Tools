@@ -1,7 +1,7 @@
 # zcode-pilot · ZCode 客户端一站式原生增强套件
 
 <p align="left">
-  <a href="https://github.com/HUIdada1/Zcode-Tools/releases"><img src="https://img.shields.io/badge/version-0.8.0-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/HUIdada1/Zcode-Tools/releases"><img src="https://img.shields.io/badge/version-0.8.1-blue.svg?style=flat-square" alt="Version"></a>
   <img src="https://img.shields.io/badge/python-3.10+-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/dependencies-0%20(std%20only)-success.svg?style=flat-square" alt="Dependencies">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg?style=flat-square" alt="Platform">
@@ -37,7 +37,7 @@
 
 > 💡 **全自动开箱即用**：插件清单内所有功能默认全开，无需打开配置页。如需关闭某项，在插件配置页拨成关并保存即可。
 
-> 🔄 **一键更新**：市场会按插件清单里的 `version` 做版本检测。已装旧版的用户在 **设置 → 插件** 刷新市场后，插件卡片会出现「有更新」徽标，点单插件更新或顶部「全部更新」即可。更新只替换插件目录，**仍需完全退出 ZCode 一次**（托盘右键 → 退出），看护才会按新版本重新注入 `app.asar`；只更新不退出，界面增强不会变化。
+> 🔄 **一键更新（0.8.1 起自动重注入）**：市场会按插件清单里的 `version` 做版本检测。已装旧版的用户在 **设置 → 插件** 刷新市场后，插件卡片会出现「有更新」徽标，点单插件更新或顶部「全部更新」即可。更新只替换插件目录；后台常驻看护会在你**完全退出 ZCode 一次**（托盘右键 → 退出）的瞬间发现版本变化，直接改用**新版插件目录**的脚本重写 `app.asar`，写完自动把客户端重新拉起来 —— **不需要手动运行任何命令，也不用退第二次**。
 
 ---
 
@@ -45,7 +45,7 @@
 
 | 特性 | 功能名称 | 核心效果 | 改动范围 |
 |:---:|:---|:---|:---|
-| 🛡️ | **升级自动自愈** | 动态监控客户端与插件版本，升级后自动感知并调度看护静默修复 | 状态监控器 |
+| 🛡️ | **升级自动自愈** | 客户端升级、**插件市场更新**都会自动感知：完全退出一次即由常驻看护用新版脚本重注入并自动重启，无需手动命令、无需退第二次 | 状态监控器 |
 | 🔁 | **自动继续** | 输入框「模式切换」右侧常驻开关（按会话独立，只影响当前对话）；中断 / 超限 / 无输出 / 仅推理时自动补发续跑文本，默认宽限 3s、冷却 20s、最多连发 3 次；provider 流中断等 TurnError 由渲染层兜底续跑；设置页「ZCode Pilot」tab 可自定义 | `app.asar` 注入脚本 + IPC |
 | 🌀 | **循环守卫** | 独立运行：识别重复动作循环后打断当前轮，并用「换方式继续」重启运行；当前会话关闭自动继续时同步失效 | `app.asar` 注入脚本 |
 | 🗂️ | **中断会话恢复** | 客户端意外退出时记录在途轮次，下次启动可一键恢复该会话 | `app.asar` 注入脚本 + IPC |
@@ -166,6 +166,13 @@ run.cmd                        # Windows
 
 <details>
 <summary><b>📜 历史版本审计与故障排查记录</b></summary>
+
+#### 0.8.1（插件更新自动重注入 + 三处体验修正）
+- **插件市场更新后自动重注入**：新增跨版本目录共享的注入版本记账（`~/.zcode/pilot/injected.json`）与常驻看护。市场更新后**完全退出 ZCode 一次**，看护会在退出瞬间发现「插件目录换了版本」，直接用**新版目录**的 `sync.py --apply-now` 重写 `app.asar`（绝不用旧目录的脚本把旧实现写回去），随后自动拉起客户端；不再需要手动执行命令，也不需要为了生效退第二次；
+- **看护单例跨版本**：`watchdog.pid` / `watchdog.want` / `watchdog.watch` 统一放到 `~/.zcode/pilot/`，避免新旧版本的看护同时存在而互相覆盖注入结果；
+- **会话统计补全（长轮次不再整屏「—」）**：官方 `turnHeader.modelDurationMs / toolDurationMs` 并非所有轮次、所有客户端版本都会下发。新增本地事件时间戳兜底——`genMs` 累计连续吐字区间作为模型用时，`toolWaitMs` 累计「上一请求结束 → 下一次开始吐字」作为工具调用用时；TPS 在官方时长缺失时同样退回 `genMs` 口径。估算值在面板上以「≈」标注，长工具链轮次（如 107 步）也能看到速度与用时；
+- **TPS 状态栏下移**：底部状态条整体 `translateY(6px)`，贴住窗口底部，不再悬空（`margin-top` 保持 3px 不动，避免把输入框顶上去）；
+- **润色按钮默认高亮**：输入框旁「增强提示词」按钮默认就是原来的悬停态（绿色玻璃底 + 绿色图标 + 内描边），常驻可见；悬停再加深一档保留反馈，暗色主题同步适配。
 
 #### 0.8.0（失败轮次兜底 + 毛玻璃科技感界面 + 移除模型弹窗加宽）
 - **失败轮次兜底**：provider 流中断（`upstream_stream_read_error` 等）、SSE 解析失败、上游 200+error 等 TurnError 不触发官方 Stop hook，改由渲染层识别 `turnHeader.state="failed"` 后补发「继续」；用户主动停止、真人插话、切会话都不接力，设置页可单独关闭；

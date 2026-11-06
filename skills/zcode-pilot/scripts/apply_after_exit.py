@@ -27,9 +27,15 @@ except ImportError:                    # 被别处 import 时脚本目录可能�
 
 HERE = Path(__file__).resolve().parent
 LOG = HERE / "_apply_after_exit.log"
-PID_FILE = HERE / "_watchdog.pid"
-WANT_FILE = HERE / "_watchdog.want"
+# 单例文件必须跨插件版本目录共享：市场更新会换版本目录（0.8.0 → 0.8.1），
+# 若把 pid/want 留在插件目录里，新旧两个看护会同时存在并互相覆盖注入结果。
+STATE_DIR = Path.home() / ".zcode" / "pilot"
+PID_FILE = STATE_DIR / "watchdog.pid"
+WANT_FILE = STATE_DIR / "watchdog.want"
 POLL_SEC = 1
+#: 常驻监听插件更新时（没有待办）用低频轮询，避免整场会话每秒都去 tasklist；
+#: 真有待办补丁时仍用 POLL_SEC，保证退出后尽快落盘。
+IDLE_POLL_SEC = 5
 MAX_WAIT_SEC = 24 * 3600
 #: 客户端改完/更新后常在几秒内被重新拉起。一次写不进去不代表永久失败：
 #: 保留待办、等它下次完全退出再写。轮数是防死循环的硬上限，不是正常路径。
@@ -162,6 +168,110 @@ DEFAULT_TASKS = [
 ]
 
 
+def _watch_flag() -> Path:
+    """常驻开关文件：与 WANT_FILE 同目录（测试里 WANT_FILE 被改到临时目录时自动隔离）。"""
+    return WANT_FILE.with_name("watchdog.watch")
+
+
+def _watch_enabled(argv: list[str] | None = None) -> bool:
+    return "--watch-plugin-update" in (argv if argv is not None else sys.argv[1:]) \
+        or _watch_flag().is_file()
+
+
+def _installed_plugin() -> dict:
+    """市场登记表里的当前安装：`{version, root}`。读不到返回 `{}`。"""
+    import json
+    path = Path.home() / ".zcode" / "cli" / "plugins" / "installed_plugins.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    for ent in data.get("plugins") or []:
+        if not isinstance(ent, dict):
+            continue
+        name = str(ent.get("id") or "").split("@")[0] or str(ent.get("name") or "")
+        if name not in ("zcode-pilot", "zcode-tokenspeed"):
+            continue
+        root = ent.get("installPath")
+        if root and Path(root).is_dir():
+            return {"version": str(ent.get("version") or ""),
+                    "root": Path(root).resolve()}
+    return {}
+
+
+def _inject_record() -> dict:
+    import json
+    try:
+        return json.loads((WANT_FILE.parent / "injected.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def update_pending() -> dict:
+    """客户端退出时：市场装的是不是比「已注入版本」更新的插件？是则返回新版信息。
+
+    这是「插件市场更新后自动重新注入」的判定点：更新发生在会话中途，客户端退出那一刻
+    不会再有钩子被触发，只有常驻看护能在这里发现版本变了，并改用**新版插件目录**的
+    sync.py 完成重注入。
+    """
+    if not _watch_enabled():
+        return {}
+    cur = _installed_plugin()
+    rec = _inject_record()
+    if not cur or not rec:
+        return {}
+    old = str(rec.get("pluginVersion") or "")
+    if cur["version"] and old and cur["version"] != old:
+        return {**cur, "from": old}
+    return {}
+
+
+def _sync_script(root: Path) -> Path | None:
+    """在新版插件根下找到 sync.py（兼容市场缓存与「市场根即插件根」两种布局）。"""
+    for rel in (("skills", "zcode-pilot", "scripts", "sync.py"),
+                ("skills", "zcode-tokenspeed", "scripts", "sync.py"),
+                ("scripts", "sync.py")):
+        p = root.joinpath(*rel)
+        if p.is_file():
+            return p
+    return None
+
+
+def apply_plugin_update(upd: dict) -> bool:
+    """用**新版插件目录**的 sync.py 重注入。返回 True=确认已落地。
+
+    成功判据不是退出码（sync 总是 0），而是它写下的注入版本记录变成了新版本 ——
+    这保证「记录说新版本已注入」与「app.asar 里真的是新脚本」是同一件事。
+    """
+    script = _sync_script(Path(upd["root"]))
+    if script is None:
+        log(f"插件已更新至 v{upd['version']}，但在 {upd['root']} 下找不到 sync.py，改走本地补丁")
+        return False
+    log(f"检测到插件已更新 {upd.get('from', '?')} → v{upd['version']}，改用新版脚本重注入：{script}")
+    try:
+        r = subprocess.run([PYTHON, str(script), "--apply-now"], capture_output=True,
+                           timeout=PATCH_TIMEOUT, cwd=str(script.parent),
+                           **no_window_kwargs())
+        out = ((r.stdout or b"") + (r.stderr or b"")).decode("utf-8", "replace")
+        log(f"$ sync.py --apply-now  [exit={r.returncode}]\n{out}".rstrip())
+    except subprocess.TimeoutExpired:
+        log(f"插件更新后重注入超时（{PATCH_TIMEOUT}s），改走本地补丁")
+        return False
+    ok = str(_inject_record().get("pluginVersion") or "") == str(upd["version"])
+    if not ok:
+        log("新版脚本没有确认落地（注入版本记录未更新），改走本地补丁兜底")
+    return ok
+
+
+def _record_injected() -> None:
+    """本地补丁成功后记下注入版本（只在市场安装目录里才会真正写入）。"""
+    try:
+        import sync
+        sync.write_inject_record()
+    except Exception:
+        pass
+
+
 def _save_wants(argv: list[str]) -> None:
     """把传入的 --want 参数与已存的合并并写入 WANT_FILE。"""
     wants_dict = {}
@@ -185,6 +295,7 @@ def _save_wants(argv: list[str]) -> None:
     if wants_dict:
         try:
             import json
+            WANT_FILE.parent.mkdir(parents=True, exist_ok=True)
             WANT_FILE.write_text(json.dumps(wants_dict, ensure_ascii=False), encoding="utf-8")
         except Exception:
             pass
@@ -197,8 +308,13 @@ def _save_wants(argv: list[str]) -> None:
 
 def parse_wants(argv: list[str]):
     """解析 sync.py 传入的 --want=<key>=on|off 或 WANT_FILE。
-    返回 [(args, revert), ...]；没有任何 --want 输入时返回 None（走 DEFAULT_TASKS）。"""
-    has_explicit_input = any(a.startswith("--want=") for a in argv) or WANT_FILE.is_file()
+
+    返回 [(args, revert), ...]；没有任何输入时返回 None（走 DEFAULT_TASKS）。
+    `--watch-plugin-update` 表示「常驻监听插件市场更新」：此时即使没有待办，
+    也必须返回空列表（而不是 None），否则会误落进 DEFAULT_TASKS 把开关全装一遍。"""
+    watch_only = "--watch-plugin-update" in argv
+    has_explicit_input = (any(a.startswith("--want=") for a in argv)
+                          or WANT_FILE.is_file() or watch_only)
     merged_wants = {}
     if WANT_FILE.is_file():
         try:
@@ -295,14 +411,18 @@ def main() -> int:
         except Exception:
             pass
     try:
+        PID_FILE.parent.mkdir(parents=True, exist_ok=True)
         PID_FILE.write_text(str(cur_pid), encoding="utf-8")
     except Exception:
         pass
     _save_wants(sys.argv[1:])
 
+    # 常驻监听（插件市场更新）：没有待办也要等退出，届时检查版本是否变了。
+    watch = _watch_enabled()
+
     # 预检：如果明确指定了需求但过滤后无待办任务（如仅 reasoning_config=off），直接退出
     early_tasks = parse_wants(sys.argv[1:])
-    if early_tasks is not None and not early_tasks:
+    if early_tasks is not None and not early_tasks and not watch:
         log("没有待应用的补丁任务，看护退出，不进行等待与重启")
         _cleanup_singletons(cur_pid)
         return 0
@@ -312,26 +432,52 @@ def main() -> int:
     raw_tasks = parse_wants(sys.argv[1:])
     if raw_tasks is None:
         raw_tasks = [(args, False) for args in DEFAULT_TASKS]
-    if not raw_tasks:
+    if not raw_tasks and not watch:
         log("ZCode 已退出，但检查后无有效补丁任务需要执行，看护完成，不重启 ZCode")
         _cleanup_singletons(cur_pid)
         return 0
     desc = "、".join(("还原 " if rev else "应用 ") + (" ".join(a) or "内核补丁") for a, rev in raw_tasks)
-    log(f"待处理：{desc}")
+    if desc:
+        log(f"待处理：{desc}")
+    if not raw_tasks:
+        log("无待办补丁：常驻监听插件市场更新（退出时若版本变化会自动重注入）")
 
     tasks = batch_tasks(raw_tasks)
+    # 有待办时保持 1s 轮询（退出后尽快落盘）；纯监听时降到 5s，避免整场会话高频 tasklist。
+    poll = POLL_SEC if tasks else IDLE_POLL_SEC
     failed = 0
+    applied_update = False
+    update_failed = False
     for round_no in range(1, MAX_PATCH_ROUNDS + 1):
         waited = 0
         while zcode_running():
-            time.sleep(POLL_SEC)
-            waited += POLL_SEC
+            time.sleep(poll)
+            waited += poll
             if waited >= MAX_WAIT_SEC:
                 log("等待超时（24h），放弃本轮；待办保留")
                 _release_pid(cur_pid)
                 return 1
 
         log(f"ZCode 已退出（等待 {waited}s），开始写入（第 {round_no}/{MAX_PATCH_ROUNDS} 轮）")
+
+        # ★ 插件市场更新优先：更新只换了插件目录，旧目录的脚本还是旧实现。
+        #   必须改用**新版目录**的 sync.py 按期望状态重写，绝不能用本地 patcher 把旧版写回去。
+        upd = update_pending()
+        if upd:
+            if apply_plugin_update(upd):
+                applied_update = True
+                failed = 0
+                break
+            log("插件更新重注入未确认成功：保留待办等下次会话继续（不写回旧版脚本）")
+            failed = 1
+            update_failed = True
+            break
+
+        if not tasks:
+            log("ZCode 已退出，但没有待办补丁，本次不重启 ZCode")
+            _cleanup_singletons(cur_pid)
+            return 0
+
         failed = 0
         for args, revert in tasks:
             cmd = [PYTHON, str(HERE / "zcode_patcher.py"), *args] + (["--revert"] if revert else [])
@@ -367,10 +513,17 @@ def main() -> int:
         break
 
     if failed:
-        log(f"已重试 {MAX_PATCH_ROUNDS} 轮仍有 {failed} 类写入未成功；"
-            "待办已保留，下次会话启动会继续排期（无需手动处理）")
+        if update_failed:
+            log("插件更新重注入未完成；待办已保留，下次会话启动会继续排期（无需手动处理）")
+        else:
+            log(f"已重试 {MAX_PATCH_ROUNDS} 轮仍有 {failed} 类写入未成功；"
+                "待办已保留，下次会话启动会继续排期（无需手动处理）")
         _release_pid(cur_pid)
         return 1
+
+    # 本地补丁写完 → 记下注入版本（新版重注入已由 sync 自己记过）。
+    if not applied_update:
+        _record_injected()
 
     res, exe = resolve_install()
     _cleanup_singletons(cur_pid)

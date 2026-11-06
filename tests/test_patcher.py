@@ -110,18 +110,25 @@ def patcher_stubbed(sync, states=None, verdicts=None, legacy=False):
     vtable = verdicts or {}
     calls = []
     orig = (sync.check_state, sync.run_patcher, sync.start_watchdog,
-            sync.legacy_cleanup_needed)
+            sync.legacy_cleanup_needed, sync.plugin_update_pending,
+            sync.write_inject_record)
     sync.check_state = lambda args: table.get(tuple(args), "on")
     sync.run_patcher = lambda args, revert: (
         calls.append(("run", tuple(args), revert)),
         vtable.get(tuple(args), "ok"))[1]
-    sync.start_watchdog = lambda wanted: calls.append(("watchdog", dict(wanted)))
+    # 只记录**带待办**的看护调用：常驻监听插件更新的空调用（{}）不算「写入」，
+    # 否则所有「已一致时不该有任何动作」的断言都会因为常驻看护而误报。
+    sync.start_watchdog = lambda wanted: calls.append(("watchdog", dict(wanted))) if wanted else None
     sync.legacy_cleanup_needed = lambda: bool(legacy)
+    # 插件市场更新判定会读本机真实的市场登记表/注入记录：不打桩会让断言随开发机漂移。
+    sync.plugin_update_pending = lambda: {}
+    sync.write_inject_record = lambda *a, **kw: None
     try:
         yield calls
     finally:
         (sync.check_state, sync.run_patcher, sync.start_watchdog,
-         sync.legacy_cleanup_needed) = orig
+         sync.legacy_cleanup_needed, sync.plugin_update_pending,
+         sync.write_inject_record) = orig
 
 
 def make_cjs(anchor: str, prefix: str = "/*pre*/", suffix: str = "/*post*/",
