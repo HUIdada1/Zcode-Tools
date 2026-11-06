@@ -71,9 +71,10 @@ class WatchdogRetryCase(unittest.TestCase):
             calls.append(cmd)
             return _Result(1 if len(calls) == 1 else 0)
 
-        # 轮 1 等待：False；轮 1 失败后：True（客户端被拉起）；轮 2 等待：False；
-        # 成功后重启前：False。
-        running = [False, True, False, False]
+        # 轮 1 等待：False（退出）→ 退出确认也 False；轮 1 失败后：True（客户端被拉起）；
+        # 轮 2 等待：False → 确认 False；成功后重启前：False。
+        # 注意：每次「判定退出」都会经 EXIT_CONFIRM_SEC 再采一次（防把重启当退出）。
+        running = [False, False, True, False, False, False]
         with patch.object(wd.subprocess, "run", side_effect=fake_run), \
              patch.object(wd, "zcode_running", side_effect=running), \
              patch.object(wd, "resolve_install",
@@ -108,7 +109,10 @@ class WatchdogRetryCase(unittest.TestCase):
             calls.append(cmd)
             return _Result(2 if len(calls) == 1 else 0)
 
-        running = [False, True, False, False]
+        # ① 第一次「退出」其实是重启（确认阶段发现客户端又在跑）→ 不写、继续等；
+        # ② 第二次真退出 → 写入被预检拒绝（又被拉起）→ 等下次；
+        # ③ 第三次真退出 → 写成功 → 重启前确认已退出。
+        running = [False, True, False, False, True, False, False, False]
         with patch.object(wd.subprocess, "run", side_effect=fake_run), \
              patch.object(wd, "zcode_running", side_effect=running), \
              patch.object(wd, "resolve_install",
@@ -118,6 +122,7 @@ class WatchdogRetryCase(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(len(calls), 2, "预检被拒后必须等下次退出重试")
         self.assertIn("预检未通过", self._log())
+        self.assertIn("正在重新启动", self._log())
 
     def test_release_pid_keeps_want_file(self):
         self.pid.write_text("12345", encoding="utf-8")

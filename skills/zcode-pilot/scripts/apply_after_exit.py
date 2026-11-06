@@ -36,6 +36,9 @@ POLL_SEC = 1
 #: 常驻监听插件更新时（没有待办）用低频轮询，避免整场会话每秒都去 tasklist；
 #: 真有待办补丁时仍用 POLL_SEC，保证退出后尽快落盘。
 IDLE_POLL_SEC = 5
+#: 退出确认：客户端自己重启时会在 tasklist 里短暂消失（更新器先收尸再拉起）。
+#: 只判一次会把「正在重启」当成「已退出」，写盘必然被预检拒绝、白白浪费一轮。
+EXIT_CONFIRM_SEC = 2
 MAX_WAIT_SEC = 24 * 3600
 #: 客户端改完/更新后常在几秒内被重新拉起。一次写不进去不代表永久失败：
 #: 保留待办、等它下次完全退出再写。轮数是防死循环的硬上限，不是正常路径。
@@ -264,10 +267,11 @@ def apply_plugin_update(upd: dict) -> bool:
 
 
 def _record_injected() -> None:
-    """本地补丁成功后记下注入版本（只在市场安装目录里才会真正写入）。"""
+    """本地补丁成功后记下注入版本、并清掉「待重注入」标记（只在市场安装目录里才会真正写记录）。"""
     try:
         import sync
         sync.write_inject_record()
+        sync.clear_reinject_pending()
     except Exception:
         pass
 
@@ -448,6 +452,7 @@ def main() -> int:
     failed = 0
     applied_update = False
     update_failed = False
+    did_write = False
     for round_no in range(1, MAX_PATCH_ROUNDS + 1):
         waited = 0
         while zcode_running():
@@ -457,6 +462,11 @@ def main() -> int:
                 log("等待超时（24h），放弃本轮；待办保留")
                 _release_pid(cur_pid)
                 return 1
+        # 确认「真的退出了」而不是「正在重启」：连续两次采样都不在运行才写。
+        time.sleep(EXIT_CONFIRM_SEC)
+        if zcode_running():
+            log("检测到 ZCode 正在重新启动（退出确认失败），继续等待下次完全退出")
+            continue
 
         log(f"ZCode 已退出（等待 {waited}s），开始写入（第 {round_no}/{MAX_PATCH_ROUNDS} 轮）")
 
@@ -466,6 +476,7 @@ def main() -> int:
         if upd:
             if apply_plugin_update(upd):
                 applied_update = True
+                did_write = True
                 failed = 0
                 break
             log("插件更新重注入未确认成功：保留待办等下次会话继续（不写回旧版脚本）")
@@ -500,6 +511,7 @@ def main() -> int:
                 failed += 1
 
         if failed == 0:
+            did_write = True
             break
 
         # 写失败：如果客户端又跑起来了，等它下次退出再写（这才是最常见的真实场景）。
@@ -518,6 +530,13 @@ def main() -> int:
         else:
             log(f"已重试 {MAX_PATCH_ROUNDS} 轮仍有 {failed} 类写入未成功；"
                 "待办已保留，下次会话启动会继续排期（无需手动处理）")
+        _release_pid(cur_pid)
+        return 1
+
+    if not did_write:
+        # 多轮都是「刚退出就又启动」→ 从未获得写入窗口。保留待办与「待重注入」标记，
+        # 让下次会话明确提示用户：退出后要等看护自动拉起，别手动抢跑。
+        log("客户端反复重启，未获得写入窗口；待办已保留，下次会话启动会继续排期")
         _release_pid(cur_pid)
         return 1
 

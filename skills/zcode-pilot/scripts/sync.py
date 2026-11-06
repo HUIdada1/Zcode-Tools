@@ -75,6 +75,9 @@ WANT_FILE = WATCHDOG_DIR / "watchdog.want"
 PID_FILE = WATCHDOG_DIR / "watchdog.pid"
 WATCH_FLAG = WATCHDOG_DIR / "watchdog.watch"
 INJECT_RECORD = WATCHDOG_DIR / "injected.json"
+# 上次「退出后重注入」是否被客户端提前启动打断：写了待办但没能落盘时留下这个标记，
+# 下次会话启动时据此提醒用户「还差一次完全退出，且期间别手动打开客户端」。
+PENDING_FILE = WATCHDOG_DIR / "reinject.pending"
 # 市场安装登记表：插件市场在「更新」完成的瞬间就会改写它（比插件目录里的清单更及时）。
 INSTALLED_PLUGINS = Path.home() / ".zcode" / "cli" / "plugins" / "installed_plugins.json"
 
@@ -390,6 +393,33 @@ def plugin_update_pending() -> dict:
     if cur["version"] and old and cur["version"] != old:
         return {**cur, "from": old}
     return {}
+
+
+# ---------- 「待重注入」标记：写入被客户端启动打断时，下次会话要明确告诉用户 ----------
+def mark_reinject_pending(keys) -> None:
+    try:
+        WATCHDOG_DIR.mkdir(parents=True, exist_ok=True)
+        PENDING_FILE.write_text(json.dumps({
+            "keys": list(keys),
+            "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        }, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def read_reinject_pending() -> dict:
+    try:
+        data = json.loads(PENDING_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def clear_reinject_pending() -> None:
+    try:
+        PENDING_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def read_options():
@@ -816,7 +846,13 @@ def run_sync(echo: bool = False, inline_repack: bool = False, watch: bool = True
 
     # 记账：所有重打包级补丁都与当前脚本一致（没有待办/失败）→ 记下注入版本，
     # 下次市场更新时就能据此判断「注入内容已经旧了」。
-    if not failed and not any(k in deferred for k, _a, rep in PATCHES if rep):
+    repack_deferred = [k for k, _a, rep in PATCHES if rep and k in deferred]
+    if repack_deferred:
+        # 还差一次「退出后写入」：留标记，下次会话启动时提醒用户别手动抢跑。
+        mark_reinject_pending(repack_deferred)
+    else:
+        clear_reinject_pending()
+    if not failed and not repack_deferred:
         write_inject_record()
 
     parts = []
@@ -932,8 +968,8 @@ NOTICE_HEAD = "ZCode Pilot 已自动接管本地补丁注入（无需手动配�
 
 
 def build_notice(is_upgrade: bool = False, version: str = "",
-                 plugin_version: str = "") -> str:
-    """自动注入时注入会话的说明（区分首次安装、客户端升级、插件市场更新）。"""
+                 plugin_version: str = "", reinject: bool = False) -> str:
+    """自动注入时注入会话的说明（客户端升级 / 插件市场更新 / 上次重注入被打断 / 首次安装）。"""
     doctor = HERE / "doctor.py"
     ver_tag = f"至 v{version} " if version else ""
     if is_upgrade:
@@ -941,15 +977,27 @@ def build_notice(is_upgrade: bool = False, version: str = "",
             f"检测到 ZCode 客户端已升级{ver_tag}！官方升级会覆盖客户端文件，增强补丁已在后台自动重新排期：\n"
             "· 全部补丁项将在你**完全退出 ZCode**（托盘图标右键 → 退出，关窗口不算）时由后台看护自动写入；\n"
             "  写入完成后看护会自动重启 ZCode，下次启动即可重新恢复全部增强功能！\n"
+            "  ⚠️ 退出后请等看护把客户端自动拉起来（约 10–60 秒），**不要在写入完成前手动打开 ZCode** ——\n"
+            "  手动打开会让写入被拒绝（app.asar 被锁），只能再等下次退出。\n"
             "· 随时可运行自检核对当前各补丁状态（只读）：\n"
             f'    python "{doctor}"'
         )
     if plugin_version:
+        tail = ("\n⚠️ 上次的写入就是在客户端提前启动时被拒绝的：这次退出后请耐心等待自动拉起，"
+                "不要手动打开。") if reinject else ""
         return (
-            f"检测到插件已从市场更新至 v{plugin_version}。新版注入脚本会在你**完全退出 ZCode**"
-            "（托盘图标右键 → 退出）时由后台看护自动重写，退出后看护会自动重新拉起客户端，"
-            "**无需任何手动操作，也不必再退第二次**。\n"
+            f"检测到插件已从市场更新至 v{plugin_version}。新版注入脚本需要一次**完全退出 ZCode**"
+            "（托盘图标右键 → 退出）的写入窗口，退出后看护会自动重新拉起客户端。\n"
+            "⚠️ 写入通常需要 10–60 秒：**不要在写入完成前手动打开 ZCode** —— 手动打开会让写入被拒绝"
+            "（app.asar 被锁），只能再退一次。" + tail + "\n"
             f'想看当前状态可运行（只读，可选）：\n    python "{doctor}"'
+        )
+    if reinject:
+        return (
+            "上次的补丁写入没有完成：客户端在写入前被重新打开了（app.asar 被锁，补丁脚本按设计拒绝硬改）。\n"
+            "请再**完全退出 ZCode 一次**（托盘图标右键 → 退出），并等待看护自动把客户端拉起来"
+            "（约 10–60 秒）—— **期间不要手动打开 ZCode**，否则会再次被打断。\n"
+            f'想核对当前状态可运行（只读，可选）：\n    python "{doctor}"'
         )
     return (
         f"{NOTICE_HEAD}。本次会话启动时已在后台开始同步：\n"
@@ -957,6 +1005,7 @@ def build_notice(is_upgrade: bool = False, version: str = "",
         "增强提示词、模型拉取按钮）都要等你**完全退出 ZCode**（托盘图标右键 → 退出）时才会写入 ——\n"
         "  客户端运行期间会拒绝改写 app.asar 与 provider_config.json；退出后由看护写入，"
         "并自动把 ZCode 重新拉起来，再启动即可见。\n"
+        "  ⚠️ 退出后请等看护自动拉起（约 10–60 秒），不要让手动打开抢先，否则写入会被拒绝。\n"
         "  「自动继续」的开关状态是例外：它写的是运行态状态文件 ~/.zcode/pilot/state.json，"
         "运行中也立即生效。\n"
         "这一条只在首次自动注入时出现。想核对结果可以运行（只读，可选）：\n"
@@ -964,10 +1013,12 @@ def build_notice(is_upgrade: bool = False, version: str = "",
     )
 
 
-def emit_notice(is_upgrade: bool = False, version: str = "", plugin_version: str = "") -> None:
+def emit_notice(is_upgrade: bool = False, version: str = "", plugin_version: str = "",
+                reinject: bool = False) -> None:
     """往会话里注入一条说明，让「自动注入到底做没做」看得见。"""
     try:
-        print(json.dumps({"additionalContext": build_notice(is_upgrade, version, plugin_version)},
+        print(json.dumps({"additionalContext": build_notice(is_upgrade, version,
+                                                            plugin_version, reinject)},
                          ensure_ascii=False))
     except Exception as exc:
         log(f"提示输出失败: {exc!r}")
@@ -994,9 +1045,11 @@ def main() -> None:
         beat("已启动（后台同步）")
         notify, is_up, ver = detect_upgrade_or_first_run()
         pending = plugin_update_pending()
-        if notify or pending:
+        reinj = read_reinject_pending()
+        if notify or pending or reinj:
             emit_notice(is_upgrade=is_up, version=ver,
-                        plugin_version="" if is_up else str(pending.get("version") or ""))
+                        plugin_version="" if is_up else str(pending.get("version") or ""),
+                        reinject=bool(reinj))
         if not spawn_detached(["--worker", "--from-hook"]):
             beat(run_sync(echo=False))  # 兜底：后台起不来就前台做完
         return

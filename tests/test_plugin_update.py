@@ -145,5 +145,54 @@ class WatchdogUpdateCase(unittest.TestCase):
         self.assertIn("常驻监听插件市场更新", self._log())
 
 
+class ReinjectPendingCase(unittest.TestCase):
+    """「写入被客户端提前启动打断」必须留痕，并在下次会话明确告诉用户怎么做。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="zpatch-pending-", ignore_cleanup_errors=True)
+        self.root = Path(self.tmp.name)
+        self._orig = sync.PENDING_FILE
+        sync.PENDING_FILE = self.root / "reinject.pending"
+
+    def tearDown(self):
+        sync.PENDING_FILE = self._orig
+        self.tmp.cleanup()
+
+    def test_mark_read_clear_roundtrip(self):
+        self.assertEqual(sync.read_reinject_pending(), {})
+        sync.mark_reinject_pending(["tps_footer", "enhance_prompt"])
+        self.assertEqual(sync.read_reinject_pending().get("keys"),
+                         ["tps_footer", "enhance_prompt"])
+        sync.clear_reinject_pending()
+        self.assertEqual(sync.read_reinject_pending(), {})
+
+    def test_repack_deferral_marks_pending(self):
+        orig = (sync.read_options, sync.declared_defaults, sync.check_state,
+                sync.start_watchdog, sync.legacy_cleanup_needed,
+                sync.write_inject_record, sync.log)
+        try:
+            sync.read_options = lambda: ({"tps_footer": True}, "test")
+            sync.declared_defaults = lambda: {}
+            sync.check_state = lambda args: "stale"
+            sync.start_watchdog = lambda wanted: None
+            sync.legacy_cleanup_needed = lambda: False
+            sync.write_inject_record = lambda *a, **kw: None
+            sync.log = lambda msg: None
+            sync.run_sync(echo=False)
+        finally:
+            (sync.read_options, sync.declared_defaults, sync.check_state,
+             sync.start_watchdog, sync.legacy_cleanup_needed,
+             sync.write_inject_record, sync.log) = orig
+        self.assertEqual(sync.read_reinject_pending().get("keys"), ["tps_footer"])
+
+    def test_notice_warns_not_to_open_manually(self):
+        text = sync.build_notice(reinject=True)
+        self.assertIn("完全退出 ZCode 一次", text)
+        self.assertIn("不要手动打开", text)
+        upd = sync.build_notice(plugin_version="0.8.2")
+        self.assertIn("0.8.2", upd)
+        self.assertIn("不要", upd)
+
+
 if __name__ == "__main__":
     unittest.main()

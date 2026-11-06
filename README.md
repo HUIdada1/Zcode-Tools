@@ -1,7 +1,7 @@
 # zcode-pilot · ZCode 客户端一站式原生增强套件
 
 <p align="left">
-  <a href="https://github.com/HUIdada1/Zcode-Tools/releases"><img src="https://img.shields.io/badge/version-0.8.1-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/HUIdada1/Zcode-Tools/releases"><img src="https://img.shields.io/badge/version-0.8.2-blue.svg?style=flat-square" alt="Version"></a>
   <img src="https://img.shields.io/badge/python-3.10+-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/dependencies-0%20(std%20only)-success.svg?style=flat-square" alt="Dependencies">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg?style=flat-square" alt="Platform">
@@ -166,6 +166,11 @@ run.cmd                        # Windows
 
 <details>
 <summary><b>📜 历史版本审计与故障排查记录</b></summary>
+
+#### 0.8.2（重注入被提前打开打断时不再静默 + 退出确认）
+- **写入窗口保护**：看护判定「客户端已退出」后再观察 2 秒，确认不是「更新器正在重启」才写盘；避免把重启误判为退出、白白消耗一轮并被预检拒绝；
+- **待重注入提醒**：重打包级补丁被推迟写入时记录 `~/.zcode/pilot/reinject.pending`；下次会话启动会明确提示「上次写入被打断，请再完全退出一次，并等待看护自动拉起（约 10–60 秒），期间不要手动打开 ZCode」——对应「更新后马上手动打开客户端，导致写入被拒绝」的真实故障；
+- 首次注入 / 插件更新 / 客户端升级三类提示都补上「退出后不要手动抢跑」的说明。
 
 #### 0.8.1（插件更新自动重注入 + 三处体验修正）
 - **插件市场更新后自动重注入**：新增跨版本目录共享的注入版本记账（`~/.zcode/pilot/injected.json`）与常驻看护。市场更新后**完全退出 ZCode 一次**，看护会在退出瞬间发现「插件目录换了版本」，直接用**新版目录**的 `sync.py --apply-now` 重写 `app.asar`（绝不用旧目录的脚本把旧实现写回去），随后自动拉起客户端；不再需要手动执行命令，也不需要为了生效退第二次；

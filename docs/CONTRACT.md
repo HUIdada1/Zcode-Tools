@@ -11,7 +11,7 @@
 | 显示名（marketplace `displayName`） | `ZCode Pilot` |
 | 中文显示名 | `ZCode 工具箱` |
 | 技能目录 | `skills/zcode-pilot/` |
-| 版本 | `0.8.1` |
+| 版本 | `0.8.2` |
 | 仓库名 / 市场名 | 仓库为 `Zcode-Tools`（GitHub：`HUIdada1/Zcode-Tools`），**市场 id 与插件同名 = `zcode-pilot`**：本插件从旧市场里独立出来，配置键为 `zcode-pilot@zcode-pilot` |
 | 图标 | `assets/icon.png` / `assets/banner.png`（由 `tools/make_logo.py` 生成） |
 
@@ -118,13 +118,14 @@ IPC 通道：  "zcode:pilot-state"
 ### 2.2.1 注入版本记录与常驻看护（插件市场更新自动重注入）
 
 插件市场「更新」只替换插件目录（`.../zcode-pilot/<版本>/`），**不会**重写 `app.asar`。
-为了让更新后无需手动操作、也不用退两次，注入链路增加了两个跨版本目录共享的约定：
+为了让更新后无需手动操作、也不用退两次，注入链路增加了跨版本目录共享的约定：
 
 | 文件（均在 `~/.zcode/pilot/`） | 写入方 | 语义 |
 | --- | --- | --- |
 | `watchdog.pid` / `watchdog.want` | `sync.py` / `apply_after_exit.py` | 看护单例与待办；**必须共享**，否则新旧版本的看护会同时存在并互相覆盖 |
 | `watchdog.watch` | `sync.py`（`start_watchdog`） | 常驻监听开关；存在时看护即使没有待办也等到客户端退出 |
 | `injected.json` | `sync.py`（`write_inject_record`） | `{pluginVersion, pluginRoot}`：`app.asar` 当前注入的是哪个插件版本 |
+| `reinject.pending` | `sync.py`（`mark_reinject_pending`） | 重打包级补丁尚未落盘（被客户端提前启动打断）；下次会话据此提示「再完全退出一次、等看护自动拉起、别手动打开」 |
 
 * **只在市场安装目录里记账**：`pluginRoot` 必须等于 `installed_plugins.json` 里本插件的
   `installPath`。从仓库/绿色目录手工跑 sync 不会污染记录（否则开发目录会被误判成升级）。
@@ -133,6 +134,10 @@ IPC 通道：  "zcode:pilot-state"
   把旧实现写回去），成功后自动重启客户端。
 * 成功判据是 `injected.json` 的版本已变成新版（`sync.py` 总返回 0，退出码不可信）。
 * `sync.py --apply-now`：客户端已退出场景使用，重打包级补丁当场写入且不拉起新看护。
+* **退出确认**：看护判定「已退出」后再等 `EXIT_CONFIRM_SEC`（2s）复查一次，
+  防止把「更新器正在重启」误判成退出——那会让写入被预检拒绝并白白消耗一轮。
+* 写入被拒绝/未获得窗口时 **绝不删待办**：`watchdog.want` 与 `reinject.pending` 都保留，
+  下次会话启动继续排期，并在会话里提示「退出后等看护自动拉起、别手动打开」。
 
 ## 2.3 续跑主通道 = 官方 Stop Hook（**权威**，2026-10-28 依据 REA 结论定稿）
 

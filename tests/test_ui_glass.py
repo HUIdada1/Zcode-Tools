@@ -126,7 +126,10 @@ class UiGlassSmoke(unittest.TestCase):
         with patch.object(sync, "resolve_wanted", return_value=({"model_width": True}, "test")), \
              patch.object(sync, "check_state", return_value="on"), \
              patch.object(sync, "start_watchdog", side_effect=lambda w: captured.update(w)), \
-             patch.object(sync, "log", return_value=None):
+             patch.object(sync, "log", return_value=None), \
+             patch.object(sync, "write_inject_record", return_value=None), \
+             patch.object(sync, "mark_reinject_pending", return_value=None), \
+             patch.object(sync, "clear_reinject_pending", return_value=None):
             sync.run_sync()
         self.assertEqual(captured.get("cleanup_model_width"), False,
                          "检测到残留时必须排一次清理（enabled=False → --model-width --revert）")
