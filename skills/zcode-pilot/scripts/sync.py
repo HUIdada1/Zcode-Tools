@@ -726,7 +726,10 @@ def get_client_fingerprint() -> dict:
             "size": stat.st_size,
             "mtime": int(stat.st_mtime),
         }
-    except Exception:
+    except (Exception, SystemExit):
+        # SystemExit 不是 Exception 子类：`_resolve_asars` 在没装客户端的机器上
+        # （CI / 纯 CLI / 用户卸载后）就是抛它。不一起接住会把整个 sync 打断，
+        # 连唯一正常的提示都发不出来。
         return {}
 
 
