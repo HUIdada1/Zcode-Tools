@@ -50,6 +50,7 @@ jobs:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: "utf-8"
         run: |
+          mkdir -p logs
           python autopilot.py --no-deploy --unattended --report ci-report.md --log logs/ci.log 2>&1 | tee logs/stdout.log
 
       # 公开仓库的 Actions 日志下载需要管理员权限；失败时把关键日志写进
