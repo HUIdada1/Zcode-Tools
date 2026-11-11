@@ -10,15 +10,15 @@ ZCode 紧急还原脚本（从干净备份整包恢复）
   zcode.cjs.<版本>.clean
 
 用法：
-  python restore_clean.py                 # 列出可用备份
-  python restore_clean.py --latest        # 用最新备份还原（需先完全退出 ZCode）
-  python restore_clean.py --version 3.14.3
-  python restore_clean.py --backup        # 把当前安装的文件另存为新备份
+  python zcp_restore.py                 # 列出可用备份
+  python zcp_restore.py --latest        # 用最新备份还原（需先完全退出 ZCode）
+  python zcp_restore.py --version 3.14.3
+  python zcp_restore.py --backup        # 把当前安装的文件另存为新备份
 
 安全约束（重要）：
   * 还原前会比对「备份版本」与「当前安装版本」，不一致时**拒绝执行**——否则会把旧版
     app.asar / zcode.cjs 盖到新版客户端上，反而把安装弄坏（用 --force 可强行继续）。
-  * 安装位置复用 zcode_patcher.discover()（跨平台探测），不再硬编码盘符。
+  * 安装位置复用 zcp_patcher.discover()（跨平台探测），不再硬编码盘符。
   * 备份目录默认 ~/.zcode/patcher-backups（跨平台）；历史默认 D:/ZCode-clean-backup
     若存在仍会作为回退候选。
 
@@ -32,15 +32,15 @@ import sys
 import time
 from pathlib import Path
 
-try:                                   # 控制台编码安全网（见 _console.py 的说明）
-    from _console import ok_mark, safe_stdio, warn_mark
+try:                                   # 控制台编码安全网（见 zcp_console.py 的说明）
+    from zcp_console import ok_mark, safe_stdio, warn_mark
 except ImportError:                    # 被别处 import 时脚本目录可能不在 sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _console import ok_mark, safe_stdio, warn_mark
+    from zcp_console import ok_mark, safe_stdio, warn_mark
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
-    import zcode_patcher as zp
+    import zcp_patcher as zp
 except Exception:                       # 单文件分发时退化为内置探测
     zp = None
 

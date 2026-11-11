@@ -4,12 +4,12 @@ r"""增强提示词（润色按钮）链路诊断 —— 只读，默认不发�
 
 定位「润色没用界面当前选中的模型 / 报 HTTP 400 Model is unavailable」这类跨机差异。
 
-    python enhance_doctor.py                 # 完整体检
-    python enhance_doctor.py --json          # 机器可读
-    python enhance_doctor.py --probe         # 额外做真实连通性探测（会消耗极少量额度）
-    python enhance_doctor.py --probe --only <providerId>
-    python enhance_doctor.py --model-value "bc73e3ab-.../glm-5.3" --model-label "glm-5.3"
-    python enhance_doctor.py --override-provider <id> --override-model <model>
+    python zcp_polish_zcp_doctor.py                 # 完整体检
+    python zcp_polish_zcp_doctor.py --json          # 机器可读
+    python zcp_polish_zcp_doctor.py --probe         # 额外做真实连通性探测（会消耗极少量额度）
+    python zcp_polish_zcp_doctor.py --probe --only <providerId>
+    python zcp_polish_zcp_doctor.py --model-value "bc73e3ab-.../glm-5.3" --model-label "glm-5.3"
+    python zcp_polish_zcp_doctor.py --override-provider <id> --override-model <model>
                                              # 模拟右键菜单选中的模型（explicit 档）
 
 它逐段复刻 app.asar 里 `zcode:enhance-prompt` handler 的解析逻辑，因此
@@ -43,12 +43,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 try:
-    from _console import safe_stdio
+    from zcp_console import safe_stdio
 except ImportError:
     sys.path.insert(0, str(HERE))
-    from _console import safe_stdio
+    from zcp_console import safe_stdio
 
-# —— 只能用在 cp936 下编得出来的符号（见 _console.py 说明）——
+# —— 只能用在 cp936 下编得出来的符号（见 zcp_console.py 说明）——
 OK = "[OK]"
 BAD = "[!!]"
 WARN = "[!]"

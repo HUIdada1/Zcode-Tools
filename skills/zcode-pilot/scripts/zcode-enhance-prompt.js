@@ -12,12 +12,12 @@
  *   进行中 ◌ 旋转图标   title「增强中…」
  *   可还原 ↺ 撤销图标   title「恢复原文」
  *
- * 依赖：由 zcode_patcher.py --enhance-prompt 注入，配套 preload 桥（enhancePrompt /
+ * 依赖：由 zcp_patcher.py --enhance-prompt 注入，配套 preload 桥（enhancePrompt /
  *      listEnhanceModels / saveEnhanceModel）与 main handler（zcode:enhance-prompt、
  *      zcode:enhance-model-save）。缺桥时按钮自动隐藏，不报错。
  *
  * 安全：只读输入框内容、只写输入框与自己的按钮/菜单；不额外发网络请求（请求在主进程侧发起）；
- *      异常静默，找不到输入框时自清理。诊断：window.__zenhanceDiag
+ *      异常静默，找不到输入框时自清理。诊断：window.__zcpPolishDiag
  *
  * ★ 挂载点（1.4 修复「图标跑到输入框左上角」）：
  *   图标必须落在工具栏**右侧操作区**（与发送按钮同一组）。旧实现拿「发送按钮的父节点」当
@@ -37,14 +37,14 @@
  *   触控板多出来的事件）在监听器注册之后到达而误关。
  */
 (() => {
-  if (window.__zenhance) return;
-  window.__zenhance = true;
+  if (window.__zcpPolish) return;
+  window.__zcpPolish = true;
 
   const MARK = "data-zenhance";
   const BTN_ID = "zcode-enhance-prompt-btn";
   const MENU_ID = "zenhance-model-menu";
   const STYLE_ID = "zenhance-style";
-  const diag = (window.__zenhanceDiag = window.__zenhanceDiag || {});
+  const diag = (window.__zcpPolishDiag = window.__zcpPolishDiag || {});
   diag.scriptVersion = "1.10";
 
   const TIP_IDLE = "增强提示词（右键选择模型）";
@@ -855,7 +855,7 @@
    *     彻底防止抓取到侧边栏辅助对话的模型；
    *  ② 引入会话级粘性记忆（lastKnownModel）：流式生成中若工具栏 DOM 瞬态缺失/重绘，
    *     无缝回退到刚选定的模型，绝不掉进空值 fallback；
-   *  ③ 联动 TPS 实时事件流（window.__ztpsCurrentModelId），双重锁定当前会话真实模型。 */
+   *  ③ 联动 TPS 实时事件流（window.__zcpMeterModelId），双重锁定当前会话真实模型。 */
   function currentModel() {
     let value = "", label = "";
     try {
@@ -909,8 +909,8 @@
     }
 
     // ② 跨脚本实时信源辅助（联动 zcode-tps.js 捕获的底层真实生成模型）
-    if (!value && typeof window !== "undefined" && window.__ztpsCurrentModelId) {
-      const liveMid = String(window.__ztpsCurrentModelId).trim();
+    if (!value && typeof window !== "undefined" && window.__zcpMeterModelId) {
+      const liveMid = String(window.__zcpMeterModelId).trim();
       if (liveMid) {
         value = liveMid;
         label = label || liveMid;
@@ -1444,7 +1444,7 @@
   else document.addEventListener("DOMContentLoaded", start);
 
   setTimeout(() => {
-    if (!diag.buttonAttached) console.warn("[zcode-enhance] 按钮未挂载，window.__zenhanceDiag =", diag);
-    else console.info("[zcode-enhance] 已就绪，window.__zenhanceDiag =", diag);
+    if (!diag.buttonAttached) console.warn("[zcode-enhance] 按钮未挂载，window.__zcpPolishDiag =", diag);
+    else console.info("[zcode-enhance] 已就绪，window.__zcpPolishDiag =", diag);
   }, 5000);
 })();

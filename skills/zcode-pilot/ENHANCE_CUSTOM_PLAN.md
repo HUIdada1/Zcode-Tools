@@ -33,7 +33,7 @@
 | 文件 | 修改 |
 |---|---|
 | `scripts/zcode-enhance-prompt.js` | `currentModel()` 先锚定 composer dock 再找模型按钮；dock 命中时不再因 `offsetParent=null` 丢弃；全局兜底排除 `workflow-run-settings-model` 面板节点 |
-| `scripts/zcode_patcher.py` `_ENHANCE_HANDLER` | ① 新增 **⓪热配置档**（最高优先级，读 `enhance_config.json`）；② body 参数全部热读（`maxTokens`/`temperature`）；③ 思考强度：openai 协议加 `reasoning_effort`，anthropic 协议加 `thinking.budget_tokens`（自动抬高 max_tokens）；④ classify 正则补 `not supported`，404 模型错误不再误报「路径问题」 |
+| `scripts/zcp_patcher.py` `_ENHANCE_HANDLER` | ① 新增 **⓪热配置档**（最高优先级，读 `enhance_config.json`）；② body 参数全部热读（`maxTokens`/`temperature`）；③ 思考强度：openai 协议加 `reasoning_effort`，anthropic 协议加 `thinking.budget_tokens`（自动抬高 max_tokens）；④ classify 正则补 `not supported`，404 模型错误不再误报「路径问题」 |
 
 向后兼容：`enhance_config.json` 不存在或 `providerId/modelId` 留空 = 与旧行为完全一致。
 
@@ -62,9 +62,9 @@
 - **换供应商/模型**：改 `providerId` + `modelId`，下一次点增强立即生效。
 - **思考强度**：openai-compatible 中转 → `reasoningEffort`（low/medium/high，按中转站支持的值）；
   也可以直接把 `modelId` 换成中转站的思考变体名。anthropic 协议 → `thinkingBudget`。
-- **查 providerId**：跑 `python enhance_doctor.py`（scripts 目录），第 4 节直接显示命中供应商的 id；
+- **查 providerId**：跑 `python zcp_polish_zcp_doctor.py`（scripts 目录），第 4 节直接显示命中供应商的 id；
   或看 `provider_config.json`。
-- **诊断**：增强失败后控制台看 `window.__zenhanceDiag.lastRequest / lastResult`（含 `how=config/ref/fallback`
+- **诊断**：增强失败后控制台看 `window.__zcpPolishDiag.lastRequest / lastResult`（含 `how=config/ref/fallback`
   与 `tried` 列表），一眼定位走的是哪一档。
 
 ## 四、生效路径（重要边界）
@@ -73,7 +73,7 @@
 |---|---|
 | **右键菜单选模型**（0.6.7） | **零重启**：写进 `enhance_config.json`，且本次点击走 explicit 档（双保险） |
 | `enhance_config.json`（供应商/模型/思考强度/参数） | **零重启**：下次点击即生效 |
-| 本次代码修改（前端脚本 + handler） | 需**一次性**：完全退出 ZCode → 跑 `python zcode_patcher.py --enhance-prompt`（或等看护自动写入）→ 重启 ZCode；之后永远只改配置、不再重启 |
+| 本次代码修改（前端脚本 + handler） | 需**一次性**：完全退出 ZCode → 跑 `python zcp_patcher.py --enhance-prompt`（或等看护自动写入）→ 重启 ZCode；之后永远只改配置、不再重启 |
 
 > 无法做到「改 asar 内已注入的代码还不重启」：主进程 handler 在启动时注册进内存；
 > 但本方案把所有可调项都收敛进热读配置，重启只有一次，以后不再需要。
@@ -90,5 +90,5 @@
 ## 六、验证与回滚
 
 - 验证：重启后输入文字点增强 → 成功则 toast 显示 `已用「glm-5.3-flash」增强`；
-  失败则看 `window.__zenhanceDiag.lastResult.tried` 首项应为 `config:...`。
-- 回滚：`python zcode_patcher.py --revert --enhance-prompt`；删除 `enhance_config.json` 即回到纯界面选择行为。
+  失败则看 `window.__zcpPolishDiag.lastResult.tried` 首项应为 `config:...`。
+- 回滚：`python zcp_patcher.py --revert --enhance-prompt`；删除 `enhance_config.json` 即回到纯界面选择行为。

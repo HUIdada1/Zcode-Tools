@@ -5,8 +5,8 @@
 要锁死的行为：
   1. 注入版本记录（~/.zcode/pilot/injected.json）能识别市场版本变化；
   2. 记录只在「本目录就是市场安装的当前版本目录」时写入——从仓库/绿色目录手工跑
-     sync 不能污染记录，否则会把自己的开发目录误判成一次升级；
-  3. 看护在客户端退出时发现版本变化 → 改用**新版插件目录**的 sync.py 重注入，
+     zcp_sync 不能污染记录，否则会把自己的开发目录误判成一次升级；
+  3. 看护在客户端退出时发现版本变化 → 改用**新版插件目录**的 zcp_sync.py 重注入，
      绝不用旧目录的 patcher 把旧实现写回去；
   4. 纯监听模式（--watch-plugin-update）没有待办时安静退出，不重启客户端。
 """
@@ -21,12 +21,12 @@ from unittest.mock import patch
 _HERE = Path(__file__).resolve().parent
 for _cand in (_HERE.parent / "scripts",
               _HERE.parent / "skills" / "zcode-pilot" / "scripts"):
-    if (_cand / "apply_after_exit.py").is_file():
+    if (_cand / "zcp_watchdog.py").is_file():
         sys.path.insert(0, str(_cand))
         break
 
-import apply_after_exit as wd  # noqa: E402
-import sync  # noqa: E402
+import zcp_watchdog as wd  # noqa: E402
+import zcp_sync  # noqa: E402
 
 
 class InjectRecordCase(unittest.TestCase):
@@ -34,42 +34,42 @@ class InjectRecordCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="zpatch-injrec-", ignore_cleanup_errors=True)
         self.root = Path(self.tmp.name)
         self.record = self.root / "injected.json"
-        self._orig = (sync.INJECT_RECORD, sync.installed_plugin, sync._plugin_root)
-        sync.INJECT_RECORD = self.record
+        self._orig = (zcp_sync.INJECT_RECORD, zcp_sync.installed_plugin, zcp_sync._plugin_root)
+        zcp_sync.INJECT_RECORD = self.record
 
     def tearDown(self):
-        sync.INJECT_RECORD, sync.installed_plugin, sync._plugin_root = self._orig
+        zcp_sync.INJECT_RECORD, zcp_sync.installed_plugin, zcp_sync._plugin_root = self._orig
         self.tmp.cleanup()
 
     def test_pending_when_market_version_differs_from_record(self):
         self.record.write_text(json.dumps({"pluginVersion": "0.8.0"}), encoding="utf-8")
-        sync.installed_plugin = lambda: {"version": "0.8.1", "root": str(self.root / "new")}
-        pending = sync.plugin_update_pending()
+        zcp_sync.installed_plugin = lambda: {"version": "0.8.1", "root": str(self.root / "new")}
+        pending = zcp_sync.plugin_update_pending()
         self.assertEqual(pending.get("version"), "0.8.1")
         self.assertEqual(pending.get("from"), "0.8.0")
 
     def test_no_record_means_no_pending(self):
-        sync.installed_plugin = lambda: {"version": "0.8.1", "root": str(self.root / "new")}
-        self.assertEqual(sync.plugin_update_pending(), {})
+        zcp_sync.installed_plugin = lambda: {"version": "0.8.1", "root": str(self.root / "new")}
+        self.assertEqual(zcp_sync.plugin_update_pending(), {})
 
     def test_same_version_means_no_pending(self):
         self.record.write_text(json.dumps({"pluginVersion": "0.8.1"}), encoding="utf-8")
-        sync.installed_plugin = lambda: {"version": "0.8.1", "root": str(self.root / "new")}
-        self.assertEqual(sync.plugin_update_pending(), {})
+        zcp_sync.installed_plugin = lambda: {"version": "0.8.1", "root": str(self.root / "new")}
+        self.assertEqual(zcp_sync.plugin_update_pending(), {})
 
     def test_record_is_skipped_when_running_outside_the_market_install(self):
-        """开发目录（非市场安装目录）跑 sync 不能写记录，否则会误判升级。"""
-        sync.installed_plugin = lambda: {"version": "0.8.1", "root": str(self.root / "install")}
-        sync._plugin_root = lambda: self.root / "dev"
-        sync.write_inject_record(version="0.8.1", root=str(self.root / "dev"))
+        """开发目录（非市场安装目录）跑 zcp_sync 不能写记录，否则会误判升级。"""
+        zcp_sync.installed_plugin = lambda: {"version": "0.8.1", "root": str(self.root / "install")}
+        zcp_sync._plugin_root = lambda: self.root / "dev"
+        zcp_sync.write_inject_record(version="0.8.1", root=str(self.root / "dev"))
         self.assertFalse(self.record.is_file())
 
     def test_record_written_for_the_market_install(self):
         install = self.root / "install"
         install.mkdir()
-        sync.installed_plugin = lambda: {"version": "0.8.1", "root": str(install)}
-        sync._plugin_root = lambda: install
-        sync.write_inject_record(version="0.8.1")
+        zcp_sync.installed_plugin = lambda: {"version": "0.8.1", "root": str(install)}
+        zcp_sync._plugin_root = lambda: install
+        zcp_sync.write_inject_record(version="0.8.1")
         self.assertEqual(json.loads(self.record.read_text(encoding="utf-8"))["pluginVersion"],
                          "0.8.1")
 
@@ -80,7 +80,7 @@ class WatchdogUpdateCase(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.want = self.root / "watchdog.want"
         self.pid = self.root / "watchdog.pid"
-        self.log = self.root / "_apply_after_exit.log"
+        self.log = self.root / "_zcp_watchdog.log"
         self._patches = [
             patch.object(wd, "WANT_FILE", self.want),
             patch.object(wd, "PID_FILE", self.pid),
@@ -116,12 +116,12 @@ class WatchdogUpdateCase(unittest.TestCase):
         self.assertEqual(wd.update_pending().get("version"), "0.8.1")
 
     def test_apply_update_runs_new_root_sync_and_confirms_record(self):
-        """成功判据 = 新版 sync 写下了新版本记录，而不是退出码。"""
+        """成功判据 = 新版 zcp_sync 写下了新版本记录，而不是退出码。"""
         new_root = self.root / "0.8.1"
         scripts = new_root / "skills" / "zcode-pilot" / "scripts"
         scripts.mkdir(parents=True)
         record = self.root / "injected.json"
-        (scripts / "sync.py").write_text(
+        (scripts / "zcp_sync.py").write_text(
             "import json, pathlib\n"
             f"pathlib.Path({str(record)!r}).write_text(json.dumps({{'pluginVersion': '0.8.1'}}),"
             " encoding='utf-8')\n",
@@ -138,7 +138,7 @@ class WatchdogUpdateCase(unittest.TestCase):
     def test_watch_only_exits_without_restart_when_no_update(self):
         with patch.object(wd, "zcode_running", return_value=False), \
              patch.object(wd, "resolve_install") as resolve, \
-             patch.object(sys, "argv", ["apply_after_exit.py", "--watch-plugin-update"]):
+             patch.object(sys, "argv", ["zcp_watchdog.py", "--watch-plugin-update"]):
             rc = wd.main()
         self.assertEqual(rc, 0)
         self.assertFalse(resolve.called, "没有待办也没有更新时绝不能重启客户端")
@@ -151,45 +151,80 @@ class ReinjectPendingCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="zpatch-pending-", ignore_cleanup_errors=True)
         self.root = Path(self.tmp.name)
-        self._orig = sync.PENDING_FILE
-        sync.PENDING_FILE = self.root / "reinject.pending"
+        self._orig = zcp_sync.PENDING_FILE
+        zcp_sync.PENDING_FILE = self.root / "reinject.pending"
 
     def tearDown(self):
-        sync.PENDING_FILE = self._orig
+        zcp_sync.PENDING_FILE = self._orig
         self.tmp.cleanup()
 
     def test_mark_read_clear_roundtrip(self):
-        self.assertEqual(sync.read_reinject_pending(), {})
-        sync.mark_reinject_pending(["tps_footer", "enhance_prompt"])
-        self.assertEqual(sync.read_reinject_pending().get("keys"),
+        self.assertEqual(zcp_sync.read_reinject_pending(), {})
+        zcp_sync.mark_reinject_pending(["tps_footer", "enhance_prompt"])
+        self.assertEqual(zcp_sync.read_reinject_pending().get("keys"),
                          ["tps_footer", "enhance_prompt"])
-        sync.clear_reinject_pending()
-        self.assertEqual(sync.read_reinject_pending(), {})
+        zcp_sync.clear_reinject_pending()
+        self.assertEqual(zcp_sync.read_reinject_pending(), {})
 
     def test_repack_deferral_marks_pending(self):
-        orig = (sync.read_options, sync.declared_defaults, sync.check_state,
-                sync.start_watchdog, sync.legacy_cleanup_needed,
-                sync.write_inject_record, sync.log)
+        orig = (zcp_sync.read_options, zcp_sync.declared_defaults, zcp_sync.check_state,
+                zcp_sync.start_watchdog, zcp_sync.legacy_cleanup_needed,
+                zcp_sync.write_inject_record, zcp_sync.log)
         try:
-            sync.read_options = lambda: ({"tps_footer": True}, "test")
+            zcp_sync.read_options = lambda: ({"tps_footer": True}, "test")
+            zcp_sync.declared_defaults = lambda: {}
+            zcp_sync.check_state = lambda args: "stale"
+            zcp_sync.start_watchdog = lambda wanted: None
+            zcp_sync.legacy_cleanup_needed = lambda: False
+            zcp_sync.write_inject_record = lambda *a, **kw: None
+            zcp_sync.log = lambda msg: None
+            zcp_sync.run_sync(echo=False)
+        finally:
+            (zcp_sync.read_options, zcp_sync.declared_defaults, zcp_sync.check_state,
+             zcp_sync.start_watchdog, zcp_sync.legacy_cleanup_needed,
+             zcp_sync.write_inject_record, zcp_sync.log) = orig
+        self.assertEqual(zcp_sync.read_reinject_pending().get("keys"), ["tps_footer"])
+
+    def test_client_upgrade_schedules_all_repack_patches(self):
+        """客户端升级后（所有注入都是「未打」），run_sync 必须把重打包级补丁整批排给看护。
+
+        这是「ZCode 一升级，补丁自动回来」的核心保证：升级覆盖 app.asar 后，下次会话的
+        SessionStart 会看到全部 off → 重打包级补丁转交退出后看护 → 退出一次即写入。
+        这里锁死「整批排期」与「留下待重注入标记」，避免以后有人把 defer 分支改坏。
+        """
+        import zcp_sync as sync
+        orig = (sync.read_options, sync.declared_defaults, sync.check_state, sync.start_watchdog,
+                sync.legacy_cleanup_needed, sync.write_inject_record, sync.log,
+                sync.write_pilot_state, sync.run_patcher)
+        scheduled = {}
+        try:
+            wanted = {key: True for key, _args, _repack in sync.PATCHES}
+            sync.read_options = lambda: (wanted, "test")
             sync.declared_defaults = lambda: {}
-            sync.check_state = lambda args: "stale"
-            sync.start_watchdog = lambda wanted: None
+            sync.check_state = lambda args: "off"          # 升级后 app.asar 被整体覆盖
+            sync.start_watchdog = lambda w: scheduled.update(w)
             sync.legacy_cleanup_needed = lambda: False
             sync.write_inject_record = lambda *a, **kw: None
+            sync.write_pilot_state = lambda *a, **kw: ""
+            sync.run_patcher = lambda args, revert: "ok"
             sync.log = lambda msg: None
             sync.run_sync(echo=False)
         finally:
-            (sync.read_options, sync.declared_defaults, sync.check_state,
-             sync.start_watchdog, sync.legacy_cleanup_needed,
-             sync.write_inject_record, sync.log) = orig
-        self.assertEqual(sync.read_reinject_pending().get("keys"), ["tps_footer"])
+            (sync.read_options, sync.declared_defaults, sync.check_state, sync.start_watchdog,
+             sync.legacy_cleanup_needed, sync.write_inject_record, sync.log,
+             sync.write_pilot_state, sync.run_patcher) = orig
+
+        repack_keys = {key for key, _args, repack in sync.PATCHES if repack}
+        self.assertEqual(set(scheduled), repack_keys,
+                         "升级后应把全部重打包级补丁排给看护（缺一项就会少恢复一个功能）")
+        self.assertEqual(set(sync.read_reinject_pending().get("keys") or []), repack_keys,
+                         "排期后必须留下待重注入标记，下次会话才能提示「别手动抢跑」")
 
     def test_notice_warns_not_to_open_manually(self):
-        text = sync.build_notice(reinject=True)
+        text = zcp_sync.build_notice(reinject=True)
         self.assertIn("完全退出 ZCode 一次", text)
         self.assertIn("不要手动打开", text)
-        upd = sync.build_notice(plugin_version="0.8.2")
+        upd = zcp_sync.build_notice(plugin_version="0.8.2")
         self.assertIn("0.8.2", upd)
         self.assertIn("不要", upd)
 

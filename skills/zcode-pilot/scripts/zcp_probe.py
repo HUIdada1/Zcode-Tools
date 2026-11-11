@@ -15,15 +15,15 @@ OpenAI 兼容端点的「真实输出上限」探测工具
 
 用法：
   # 测某网关全部以给定前缀开头的模型（默认 cn:）
-  python probe_max_tokens.py --base https://api.example.com/v1 --key sk-xxx
+  python zcp_probe.py --base https://api.example.com/v1 --key sk-xxx
 
   # 指定模型 / 多个前缀 / 只看计划
-  python probe_max_tokens.py --base ... --key ... --models flash,glm-5.3
-  python probe_max_tokens.py --base ... --key ... --prefix cn: --prefix global:
-  python probe_max_tokens.py --base ... --key ... --dry-run
+  python zcp_probe.py --base ... --key ... --models flash,glm-5.3
+  python zcp_probe.py --base ... --key ... --prefix cn: --prefix global:
+  python zcp_probe.py --base ... --key ... --dry-run
 
   # 控制成本与时长
-  python probe_max_tokens.py --base ... --key ... --tiers 40000,100000 --retries 2 --timeout 900
+  python zcp_probe.py --base ... --key ... --tiers 40000,100000 --retries 2 --timeout 900
 
 结果：
   - 控制台表格：模型 | 声称上限 | 实测上限 | 判据 | 耗时

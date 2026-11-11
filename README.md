@@ -1,7 +1,7 @@
 # zcode-pilot · ZCode 客户端一站式原生增强套件
 
 <p align="left">
-  <a href="https://github.com/HUIdada1/Zcode-Tools/releases"><img src="https://img.shields.io/badge/version-0.8.2-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/HUIdada1/Zcode-Tools/releases"><img src="https://img.shields.io/badge/version-0.9.0-blue.svg?style=flat-square" alt="Version"></a>
   <img src="https://img.shields.io/badge/python-3.10+-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/dependencies-0%20(std%20only)-success.svg?style=flat-square" alt="Dependencies">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg?style=flat-square" alt="Platform">
@@ -30,7 +30,7 @@
 
 | 步骤 | 操作说明 |
 |:---:|---|
-| **1. 环境确认** | 确认电脑已安装 **Python 3.10+**（系统自带或环境变量已配置）及 **ZCode 客户端**（实测支持 3.11.2 ~ 3.17.2，当前验证 3.17.2） |
+| **1. 环境确认** | 确认电脑已安装 **Python 3.10+**（系统自带或环境变量已配置）及 **ZCode 客户端**（实测支持 3.11.2 ~ 3.18.0，当前验证 3.18.0） |
 | **2. 添加市场** | 打开 ZCode **设置 → 插件 → 右上角「创建」→「添加插件市场」**，来源填：<br>`HUIdada1/Zcode-Tools` |
 | **3. 安装插件** | 在「个人」分段找到 **ZCode 原生体验增强**（`ZCode Pilot`），点 **安装**（装好默认启用） |
 | **4. 自动激活** | **完全退出并重启 ZCode**（托盘右键退出），在新会话中发任意一条消息，后台看护进程将自动完成注入并在下次启动后展现全部增强功能！ |
@@ -38,6 +38,11 @@
 > 💡 **全自动开箱即用**：插件清单内所有功能默认全开，无需打开配置页。如需关闭某项，在插件配置页拨成关并保存即可。
 
 > 🔄 **一键更新（0.8.1 起自动重注入）**：市场会按插件清单里的 `version` 做版本检测。已装旧版的用户在 **设置 → 插件** 刷新市场后，插件卡片会出现「有更新」徽标，点单插件更新或顶部「全部更新」即可。更新只替换插件目录；后台常驻看护会在你**完全退出 ZCode 一次**（托盘右键 → 退出）的瞬间发现版本变化，直接改用**新版插件目录**的脚本重写 `app.asar`，写完自动把客户端重新拉起来 —— **不需要手动运行任何命令，也不用退第二次**。
+
+> 🧬 **客户端自己升级了，也会自动再注入**：ZCode 升级会整体覆盖 `app.asar`，注入的界面随即消失；插件在**下一次会话启动**时用客户端指纹（版本号 + asar 大小）识别出这次升级，自动把全部补丁重新排给后台看护，你只需要**完全退出一次**（托盘右键 → 退出），看护在退出瞬间写入并自动拉起客户端。三条边界要清楚：
+> 1. **必须先有一次会话启动** —— `SessionStart` 是官方规范里最早的自动触发点（插件清单没有「安装时钩子」）；
+> 2. **退出后不要手动抢跑** —— 写入约 10–60 秒，期间手动打开 ZCode 会让写入被拒绝，只能再退一次；
+> 3. **新客户端若改了 asar 结构**，脚本会按设计「拒绝盲改」并在会话里明确提示，这时才需要更新插件（本版本就是为 3.18.0 做的适配）。
 
 ---
 
@@ -74,12 +79,12 @@
 
 ```powershell
 # Windows (CMD 或 PowerShell 任意路径直接运行)
-python -c "import pathlib,subprocess,sys; p=next(pathlib.Path.home().glob('.zcode/**/doctor.py'),None); subprocess.run([sys.executable,str(p),'--fix']) if p else print('未找到已安装的 ZCode 插件，请先在客户端内安装')"
+python -c "import pathlib,subprocess,sys; h=pathlib.Path.home(); p=next(iter([*h.glob('.zcode/**/zcp_doctor.py'),*h.glob('.zcode/**/doctor.py')]),None); subprocess.run([sys.executable,str(p),'--fix']) if p else print('未找到已安装的 ZCode 插件，请先在客户端内安装')"
 ```
 
 ```bash
 # macOS / Linux (任意终端直接运行)
-python3 -c "import pathlib,subprocess,sys; p=next(pathlib.Path.home().glob('.zcode/**/doctor.py'),None); subprocess.run([sys.executable,str(p),'--fix']) if p else print('未找到已安装的 ZCode 插件，请先在客户端内安装')"
+python3 -c "import pathlib,subprocess,sys; h=pathlib.Path.home(); p=next(iter([*h.glob('.zcode/**/zcp_doctor.py'),*h.glob('.zcode/**/doctor.py')]),None); subprocess.run([sys.executable,str(p),'--fix']) if p else print('未找到已安装的 ZCode 插件，请先在客户端内安装')"
 ```
 
 ---
@@ -107,7 +112,7 @@ python3 -c "import pathlib,subprocess,sys; p=next(pathlib.Path.home().glob('.zco
 若您想完全停用增强补丁并恢复官方纯净状态：
 1. 打开终端运行全域还原命令：
    ```powershell
-   python -c "import pathlib,subprocess,sys; p=next(pathlib.Path.home().glob('.zcode/**/zcode_patcher.py'),None); subprocess.run([sys.executable,str(p),'--all','--revert']) if p else None"
+   python -c "import pathlib,subprocess,sys; h=pathlib.Path.home(); p=next(iter([*h.glob('.zcode/**/zcp_patcher.py'),*h.glob('.zcode/**/zcode_patcher.py')]),None); subprocess.run([sys.executable,str(p),'--all','--revert']) if p else None"
    ```
 2. 在 ZCode **设置 → 插件 → 管理已安装** 中，点击本插件的「卸载」即可。
 
@@ -129,25 +134,25 @@ git clone https://github.com/HUIdada1/Zcode-Tools.git
 克隆仓库后，直接通过主脚本打补丁：
 ```bash
 # 只读体检（自动探测 ZCode 安装位置）
-python skills/zcode-pilot/scripts/zcode_patcher.py --all --check
+python skills/zcode-pilot/scripts/zcp_patcher.py --all --check
 
 # 先完全退出 ZCode，然后一次性注入全部补丁
-python skills/zcode-pilot/scripts/zcode_patcher.py --all
+python skills/zcode-pilot/scripts/zcp_patcher.py --all
 
 # 单独还原某项（例如还原 TPS 状态栏）
-python skills/zcode-pilot/scripts/zcode_patcher.py --tps-footer --revert
+python skills/zcode-pilot/scripts/zcp_patcher.py --tps-footer --revert
 ```
 
 ### 方式 D：一键引导脚本（开发者专用）
 ```bash
-python bootstrap.py            # macOS/Linux 使用 python3 bootstrap.py
+python zcp_bootstrap.py            # macOS/Linux 使用 python3 zcp_bootstrap.py
 ```
 自动执行平台环境校验、标准库检查、语法构建与 280+ 项回归测试。
 
 ### 方式 E：全自动流水线
 ```bash
-./run.sh                       # Linux / macOS
-run.cmd                        # Windows
+./zcp-run.sh                       # Linux / macOS
+zcp-run.cmd                        # Windows
 ```
 
 </details>
@@ -156,7 +161,7 @@ run.cmd                        # Windows
 <summary><b>🔬 自动注入机制与 ASAR 安全设计</b></summary>
 
 ### 1. 为什么补丁需要退出后写入？
-`zcode_patcher.py` 具有严格的运行预检机制：只要系统中存在 `ZCode.exe` 进程便拒绝写盘。这是因为客户端运行时 `app.asar` 文件会被底层文件系统锁定，强行改写会导致文件损坏。因此本套件设计了看护单例（Watchdog）：在会话中记录期望状态，待客户端完全退出的一瞬间原子完成写入并自动重新拉起。
+`zcp_patcher.py` 具有严格的运行预检机制：只要系统中存在 `ZCode.exe` 进程便拒绝写盘。这是因为客户端运行时 `app.asar` 文件会被底层文件系统锁定，强行改写会导致文件损坏。因此本套件设计了看护单例（Watchdog）：在会话中记录期望状态，待客户端完全退出的一瞬间原子完成写入并自动重新拉起。
 
 ### 2. ASAR 重打包安全性
 - **全域 Integrity 校验**：重打包时对所有 entry 的 SHA-256 与 offset 排布进行全局自洽检验，杜绝错位加载失败；
@@ -167,13 +172,19 @@ run.cmd                        # Windows
 <details>
 <summary><b>📜 历史版本审计与故障排查记录</b></summary>
 
+#### 0.9.0（适配 ZCode 3.18.0 + 脚本/变量改名 zcp 前缀）
+- **适配 3.18.0**：逐项复核注入锚点（`index.html` 单 `</body>`、preload `contextBridge.exposeInMainWorld("zcode"`、main `SaveMcpToUserDirectory`）、渲染层 `data-testid`（`v4-composer*` / `v4-stop` / `v4-model-config` / `chat-mode-select-trigger` / `model-provider-add-model-button`）、DOM 契约（`data-workspace-conversation-frame` / `data-session-id` / `data-turn-id` / `data-settings-*`）与 `usage.delta`、`turnHeader` 等遥测字段，全部命中后重新注入；用量图两条补丁在 3.18.0 的 chunk 上按弹性正则正常落位；
+- **脚本改名（zcp 前缀）**：`sync.py → zcp_sync.py`、`doctor.py → zcp_doctor.py`、`apply_after_exit.py → zcp_watchdog.py`、`autocontinue_hook.py → zcp_hook.py`、`zcode_patcher.py → zcp_patcher.py`、`_console.py → zcp_console.py` 等 12 个脚本，外加仓根 `zcp_bootstrap.py` / `zcp_pipeline.py` / `zcp-run.sh` / `zcp-run.cmd`；`sync.py`、`doctor.py` 保留转发壳，保证 0.8.x 的旧看护在插件更新当次仍能用新版脚本重注入；
+- **变量名去重**：注入脚本挂到渲染层的全局统一改为 `__zcpMeter*` / `__zcpPolish*` / `__zcpCore*`，模型拉取样式前缀 `zcode-pull-*` 改为 `zcp-pull-*`，避免与其他 ZCode 增强插件撞名；
+- **自动再注入边界写进文档**：客户端升级 → 下次 `SessionStart` 识别指纹 → 完全退出一次由看护写入，并明确「别手动抢跑」与「结构变更需更新插件」两条前提（详见上文）。
+
 #### 0.8.2（重注入被提前打开打断时不再静默 + 退出确认）
 - **写入窗口保护**：看护判定「客户端已退出」后再观察 2 秒，确认不是「更新器正在重启」才写盘；避免把重启误判为退出、白白消耗一轮并被预检拒绝；
 - **待重注入提醒**：重打包级补丁被推迟写入时记录 `~/.zcode/pilot/reinject.pending`；下次会话启动会明确提示「上次写入被打断，请再完全退出一次，并等待看护自动拉起（约 10–60 秒），期间不要手动打开 ZCode」——对应「更新后马上手动打开客户端，导致写入被拒绝」的真实故障；
 - 首次注入 / 插件更新 / 客户端升级三类提示都补上「退出后不要手动抢跑」的说明。
 
 #### 0.8.1（插件更新自动重注入 + 三处体验修正）
-- **插件市场更新后自动重注入**：新增跨版本目录共享的注入版本记账（`~/.zcode/pilot/injected.json`）与常驻看护。市场更新后**完全退出 ZCode 一次**，看护会在退出瞬间发现「插件目录换了版本」，直接用**新版目录**的 `sync.py --apply-now` 重写 `app.asar`（绝不用旧目录的脚本把旧实现写回去），随后自动拉起客户端；不再需要手动执行命令，也不需要为了生效退第二次；
+- **插件市场更新后自动重注入**：新增跨版本目录共享的注入版本记账（`~/.zcode/pilot/injected.json`）与常驻看护。市场更新后**完全退出 ZCode 一次**，看护会在退出瞬间发现「插件目录换了版本」，直接用**新版目录**的 `zcp_sync.py --apply-now` 重写 `app.asar`（绝不用旧目录的脚本把旧实现写回去），随后自动拉起客户端；不再需要手动执行命令，也不需要为了生效退第二次；
 - **看护单例跨版本**：`watchdog.pid` / `watchdog.want` / `watchdog.watch` 统一放到 `~/.zcode/pilot/`，避免新旧版本的看护同时存在而互相覆盖注入结果；
 - **会话统计补全（长轮次不再整屏「—」）**：官方 `turnHeader.modelDurationMs / toolDurationMs` 并非所有轮次、所有客户端版本都会下发。新增本地事件时间戳兜底——`genMs` 累计连续吐字区间作为模型用时，`toolWaitMs` 累计「上一请求结束 → 下一次开始吐字」作为工具调用用时；TPS 在官方时长缺失时同样退回 `genMs` 口径。估算值在面板上以「≈」标注，长工具链轮次（如 107 步）也能看到速度与用时；
 - **TPS 状态栏下移**：底部状态条整体 `translateY(6px)`，贴住窗口底部，不再悬空（`margin-top` 保持 3px 不动，避免把输入框顶上去）；
@@ -208,7 +219,7 @@ run.cmd                        # Windows
 
 #### 0.6.16（解决思考档位关闭导致退出无限重启死循环，Issue #5）
 - **语义修正为“不托管”**：3.14+ 思考档位配置目标为客户端自带的 `provider_config.json`；当开关关闭时语义明确为“停止托管与同步”，插件不再主动写入，且绝不主动还原该文件，彻底切断“退出还原 → 客户端重启写回 → 再次检测冲突 → 再次看护还原”的无限死循环；
-- **看护空任务守卫**：`apply_after_exit.py` 严格过滤 `reasoning_config=off` 任务；若最终无待执行补丁任务，看护直接安全退出，杜绝空任务挂起等待与退出自动重启 ZCode。
+- **看护空任务守卫**：`zcp_watchdog.py` 严格过滤 `reasoning_config=off` 任务；若最终无待执行补丁任务，看护直接安全退出，杜绝空任务挂起等待与退出自动重启 ZCode。
 - **全平台兼容吸收**：完整吸纳 PR #4 对 macOS 看护链路的跨平台支持与 crashpad 僵尸进程排除。
 
 #### 0.6.20（彻底修复提示词润色失败与“显示已完成但不出现文案”问题）
@@ -228,7 +239,7 @@ run.cmd                        # Windows
 #### 0.6.15（彻底根治会话生成中润色模型漂移与失败问题）
 - **会话粘性记忆与侧边栏隔离**：`zcode-enhance-prompt.js` 引入 `lastKnownModel` 会话粘性记忆，流式生成中当原生工具栏处于禁用/重绘瞬态时无缝沿用该会话最新选中的模型；全局搜索强制排除侧边栏，杜绝抓取辅助对话的模型；
 - **跨脚本实时事件信源联动**：`zcode-tps.js` 捕获 ServicePort 事件流的底层实时 `ev.modelId` 并暴露全局，形成模型定位双保险；
-- **主进程坚守当前供应商**：`zcode_patcher.py` 优化解析引擎，中转站与自定义模型只要所属供应商有效即坚守在该供应商发请求，彻底杜绝越界 Fallback 到系统其他无关供应商导致 400 失败的问题。
+- **主进程坚守当前供应商**：`zcp_patcher.py` 优化解析引擎，中转站与自定义模型只要所属供应商有效即坚守在该供应商发请求，彻底杜绝越界 Fallback 到系统其他无关供应商导致 400 失败的问题。
 
 #### 0.6.14（TPS 状态栏优化：去除 out 替换为会话总用量）
 - **即时指标精简**：彻底去除含义模糊的单轮 `out`，本轮指标聚焦于「首 Token 延迟」与「生成速率」，视觉更清爽；
@@ -236,7 +247,7 @@ run.cmd                        # Windows
 
 #### 0.6.13（提示词增强侧边栏隔离、看护批处理重打包与 3.14.5 适配）
 - **提示词增强侧边栏隔离**：`zcode-enhance-prompt.js` 补齐侧边栏边界判定（`isInsideSidePane`）与等高靠左优先保序，自愈分支杜绝误挂，彻底根治侧边栏辅助对话导致润色按钮飘移的竞态；
-- **看护批处理极速重打包**：`apply_after_exit.py` 重构任务调度引擎，同方向（应用或还原）多项补丁合并为单次批量调用，ASAR 重打包耗时从 20s+ 缩短至 2~3s，消除用户快速重启造成的进程冲突隐患；
+- **看护批处理极速重打包**：`zcp_watchdog.py` 重构任务调度引擎，同方向（应用或还原）多项补丁合并为单次批量调用，ASAR 重打包耗时从 20s+ 缩短至 2~3s，消除用户快速重启造成的进程冲突隐患；
 - **客户端版本认证**：完成最新客户端版本 `3.14.5` 实测认证，全量 250+ 项单元与集成测试全绿通过。
 
 #### 0.6.12（修复侧边栏辅助对话双 Composer 竞态跳动）
@@ -244,9 +255,9 @@ run.cmd                        # Windows
 - 新增 `isInsideSidePane` 与 `isInsideMainConversation` 边界判断，严格限定只在主界面对话框下显示，彻底消除跳动与轮次数据串台。
 
 #### 0.6.11（升级自愈与看护优化）
-- `sync.py` 引入客户端指纹比对，自动识别客户端升级并重置通知标记，自动调度看护；
-- `apply_after_exit.py` 补齐 7 项补丁，并实现 `_watchdog.pid` + `_watchdog.want` 单例互斥与需求合并；
-- `doctor.py` 增加 `--fix` 一键自愈命令。
+- `zcp_sync.py` 引入客户端指纹比对，自动识别客户端升级并重置通知标记，自动调度看护；
+- `zcp_watchdog.py` 补齐 7 项补丁，并实现 `_watchdog.pid` + `_watchdog.want` 单例互斥与需求合并；
+- `zcp_doctor.py` 增加 `--fix` 一键自愈命令。
 
 #### 0.6.10（旧脚本失效检测）
 - 修复 `_process_script_inject` 的 check 分支仅检查结构未比对内容的缺陷，新增内容哈希比对并标记 stale。

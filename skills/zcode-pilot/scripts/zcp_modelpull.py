@@ -15,16 +15,16 @@ default_effort，如 workbuddy2api），按模型写实 limit 与思考档位；
 改动：跨平台路径、非交互参数、元数据感知模板、--refresh、dry-run、写前备份。
 
 用法：
-  python model_pull.py                  # 交互式选择供应商
-  python model_pull.py --all            # 同步全部自定义供应商
-  python model_pull.py --provider deep  # 按名称/ID 子串匹配供应商
-  python model_pull.py --all --dry-run  # 只看会新增什么，不写配置
-  python model_pull.py --all --refresh  # 刷新已有条目的 limit/思考档位（按服务器元数据）
-  python model_pull.py --all --no-reasoning   # 新模型不带思考档位
-  python model_pull.py --test https://api.example.com/v1 [KEY]  # 只测连通并看元数据
+  python zcp_modelpull.py                  # 交互式选择供应商
+  python zcp_modelpull.py --all            # 同步全部自定义供应商
+  python zcp_modelpull.py --provider deep  # 按名称/ID 子串匹配供应商
+  python zcp_modelpull.py --all --dry-run  # 只看会新增什么，不写配置
+  python zcp_modelpull.py --all --refresh  # 刷新已有条目的 limit/思考档位（按服务器元数据）
+  python zcp_modelpull.py --all --no-reasoning   # 新模型不带思考档位
+  python zcp_modelpull.py --test https://api.example.com/v1 [KEY]  # 只测连通并看元数据
 
 注意：ZCode 运行中写 config.json 存在被客户端回写覆盖的竞态，建议完全退出后执行；
-注入版（zcode_patcher.py --model-puller）在界面内写入并自动触发刷新，无此问题。
+注入版（zcp_patcher.py --model-puller）在界面内写入并自动触发刷新，无此问题。
 """
 
 import argparse
@@ -36,11 +36,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-try:                                   # 控制台编码安全网（见 _console.py 的说明）
-    from _console import bad_mark, glyph, ok_mark, safe_stdio
+try:                                   # 控制台编码安全网（见 zcp_console.py 的说明）
+    from zcp_console import bad_mark, glyph, ok_mark, safe_stdio
 except ImportError:                    # 被别处 import 时脚本目录可能不在 sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _console import bad_mark, glyph, ok_mark, safe_stdio
+    from zcp_console import bad_mark, glyph, ok_mark, safe_stdio
 
 def resolve_v2_root() -> Path:
     """解析 v2 配置根目录：~/.zcode/v2/setting.json 的 dataBaseDir 优先
@@ -223,7 +223,7 @@ def refresh_entry(ent: dict, meta: dict, kind: str | None = None) -> list[str]:
     return changed
 
 
-def sync(providers, with_reasoning: bool, dry_run: bool, refresh: bool) -> int:
+def sync_providers(providers, with_reasoning: bool, dry_run: bool, refresh: bool) -> int:
     total_added = 0
     for pid, pdata in providers:
         name = pdata.get("name", "未命名")
@@ -417,7 +417,7 @@ def main() -> None:
         else:
             raise SystemExit("[!] 无效选择")
 
-    total = sync(selected, with_reasoning=not args.no_reasoning,
+    total = sync_providers(selected, with_reasoning=not args.no_reasoning,
                  dry_run=args.dry_run, refresh=args.refresh)
 
     if args.dry_run:

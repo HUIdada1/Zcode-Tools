@@ -300,7 +300,7 @@ const atTopLeft = (b) => !!b && ["CARD(top-left!)", "DOCK(top-left!)", "ANCHOR(t
 
 // 状态 0：待机（发送按钮在，输入框为空且 disabled）
 t.send.disabled = true;
-check(!!btn(), "待机态：按钮没挂上（hiddenReason=" + sandbox.__zenhanceDiag.hiddenReason + "）");
+check(!!btn(), "待机态：按钮没挂上（hiddenReason=" + sandbox.__zcpPolishDiag.hiddenReason + "）");
 check(inRightGroup(btn()), "待机态：按钮应落在右侧操作区，实际=" + where(btn()));
 check(!atTopLeft(btn()), "待机态：按钮不得跑到输入框左上角，实际=" + where(btn()));
 
@@ -346,7 +346,7 @@ check(btn() === ref, "幂等：不应重建按钮节点");
 check(doc.querySelectorAll(BTN).length === 1, "幂等：按钮只应有一个");
 
 // 诊断字段
-const d = sandbox.__zenhanceDiag || {};
+const d = sandbox.__zcpPolishDiag || {};
 check(d.scriptVersion === "1.10", "diag.scriptVersion 应为 1.10，实际=" + d.scriptVersion);
 check(d.buttonAttached === true, "diag.buttonAttached 应为 true");
 check(d.mountWhere === "prepend", "diag.mountWhere 应为 prepend，实际=" + d.mountWhere);
@@ -420,7 +420,7 @@ async function menuTests() {
         && calls.saved[0].modelId === "model-a",
     "saveEnhanceModel 应收到 {providerId, modelId}，实际 " + JSON.stringify(calls.saved[0]));
   check(!menu(), "选完应关闭菜单");
-  const d2 = sandbox.__zenhanceDiag || {};
+  const d2 = sandbox.__zcpPolishDiag || {};
   check(!!d2.overrideModel && d2.overrideModel.modelId === "model-a",
     "diag.overrideModel 应记录选择，实际 " + JSON.stringify(d2.overrideModel));
 
@@ -442,7 +442,7 @@ async function menuTests() {
   await tickAsync();
   check(calls.saved.length === 2 && calls.saved[1] && calls.saved[1].clear === true,
     "「跟随界面选择」应传 clear:true，实际 " + JSON.stringify(calls.saved[1]));
-  check(!(sandbox.__zenhanceDiag || {}).overrideModel,
+  check(!(sandbox.__zcpPolishDiag || {}).overrideModel,
     "clear 后 overrideModel 应回到 null");
 
   // ⑥ 菜单开着时再右键 = 收起（不能叠出两个）
@@ -476,8 +476,8 @@ async function menuTests() {
   fireDoc("mousedown", { target: doc.body });
   await tickAsync();
   check(!menu(), "保护期过后点外部应关闭菜单");
-  check((sandbox.__zenhanceDiag || {}).menuClosedBy === "outside",
-    "diag.menuClosedBy 应记录 outside，实际=" + (sandbox.__zenhanceDiag || {}).menuClosedBy);
+  check((sandbox.__zcpPolishDiag || {}).menuClosedBy === "outside",
+    "diag.menuClosedBy 应记录 outside，实际=" + (sandbox.__zcpPolishDiag || {}).menuClosedBy);
 
   // ⑩ Esc 关闭也要记录原因（便于线上定位「菜单为什么没了」）
   fire(btnEl, "contextmenu", evt());
@@ -486,8 +486,8 @@ async function menuTests() {
   fireDoc("keydown", { key: "Escape" });
   await tickAsync();
   check(!menu(), "Esc 应关闭菜单");
-  check((sandbox.__zenhanceDiag || {}).menuClosedBy === "escape",
-    "diag.menuClosedBy 应记录 escape，实际=" + (sandbox.__zenhanceDiag || {}).menuClosedBy);
+  check((sandbox.__zcpPolishDiag || {}).menuClosedBy === "escape",
+    "diag.menuClosedBy 应记录 escape，实际=" + (sandbox.__zcpPolishDiag || {}).menuClosedBy);
 
   // ⑪ ★ 按钮被重渲染摘掉时，菜单不得凭空消失（composer 重渲染很频繁）
   fire(btnEl, "contextmenu", evt());
@@ -500,7 +500,7 @@ async function menuTests() {
   check(!!menu(), "按钮被摘掉期间菜单应持续可用");
 
   // ⑫ 诊断字段：打开次数与关闭原因可查
-  const dg = sandbox.__zenhanceDiag || {};
+  const dg = sandbox.__zcpPolishDiag || {};
   check(dg.menuOpens >= 5, "diag.menuOpens 应累计打开次数，实际=" + dg.menuOpens);
   check(dg.menuClosedBy !== "scroll", "菜单关闭原因不应出现 scroll");
 }

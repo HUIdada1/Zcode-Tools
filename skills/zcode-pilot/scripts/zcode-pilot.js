@@ -2,7 +2,7 @@
  * ZCode Pilot 渲染层控制面：自动继续开关 + 崩溃恢复
  * ==================================================================
  * 架构（docs/CONTRACT.md §2.3，**已定稿，不要改**）：
- *   - 正常「自动继续」的决策与续跑 = 官方 Stop hook（autocontinue_hook.py + loopguard.py），
+ *   - 正常「自动继续」的决策与续跑 = 官方 Stop hook（zcp_hook.py + zcp_loopguard.py），
  *     **渲染层完全不参与**；渲染层没有、也不试图寻找任何「发送文本/入队/中断」的内部 API。
  *   - 渲染层只做四件事：
  *       ① 开关 UI（composer 工具条 `[data-testid="chat-mode-select-trigger"]` 右侧）
@@ -13,7 +13,7 @@
  *       ④ **崩溃恢复**时的续跑发送（唯一需要「发送」的地方，契约 §2.3.4）
  *
  * 状态文件分工（契约 §2.2，严格读-改-写，绝不整体覆盖别人的字段）：
- *   enabled / paused / cancelToken → sync.py 写；sessions[sid].mode / settings / journal → 本脚本写；
+ *   enabled / paused / cancelToken → zcp_sync.py 写；sessions[sid].mode / settings / journal → 本脚本写；
  *   lastContinueAt / sessions[sid].consecutive → hook 写。
  *
  * ★ 硬约束（违反会导致客户端卡启动或既有三个脚本 UI 被破坏）：
@@ -24,28 +24,28 @@
  *      本脚本所有自有节点一律 `data-zpilot*` 前缀；往容器里插节点时若首位已被 `[data-ztps-bar]`
  *      占据，则插在它之后，绝不顶掉 TPS 的状态栏。
  *   3. 桥缺失 / 挂载点找不到 → **安静降级**：不显示开关、不刷 console 错误、不抛异常。
- *      所有诊断只写进 `window.__zpilotDiag`。
+ *      所有诊断只写进 `window.__zcpCoreDiag`。
  *
  * ★ 崩溃恢复（契约 §2.3.4，唯一发送路径）：
  *   - 每轮进行中把在途轮次写进状态文件 `journal[sessionId]`，轮次正常收尾即删除；
  *   - 启动时若 journal 里有未收尾轮次、且当前会话空闲、且自动继续处于开启态，则：
  *       ① 用**已在本仓库验证过的五级写回**把续跑文本写进 composer
- *          （优先**直接复用** `window.__zenhanceDiag.writeText`；增强脚本未注入时使用本文件内
+ *          （优先**直接复用** `window.__zcpPolishDiag.writeText`；增强脚本未注入时使用本文件内
  *            逐字照抄自 zcode-enhance-prompt.js 的同款实现，绝不自创写回方式）
  *       ② 点击 `[data-testid="v4-composer-send"]`（缺失时回退 dock 内提交按钮 / 表单提交）
  *       ③ 校验：1.5s 内出现新的流式活动才算成功；失败重试 1 次；再失败只提示、不循环重试
  *   - 台账带 `attempts`（上限 2）与 24h 过期，重启不会无限重发。
  *
- * 回滚：本脚本由 zcode_patcher.py 的 PILOT_SPEC 注入；出问题时
- *   `python skills/zcode-pilot/scripts/restore_clean.py --latest` 秒级还原，无需重装。
+ * 回滚：本脚本由 zcp_patcher.py 的 PILOT_SPEC 注入；出问题时
+ *   `python skills/zcode-pilot/scripts/zcp_restore.py --latest` 秒级还原，无需重装。
  */
 (() => {
-  if (window.__zpilot) return;
-  window.__zpilot = true;
+  if (window.__zcpCore) return;
+  window.__zcpCore = true;
 
   const MARK = "data-zpilot";
   const dec = new TextDecoder();   // 事件流帧解码（与 zcode-tps.js 同法）
-  const diag = (window.__zpilotDiag = window.__zpilotDiag || {});
+  const diag = (window.__zcpCoreDiag = window.__zcpCoreDiag || {});
   diag.scriptVersion = "1.0";
   diag.loadedAt = new Date().toISOString();
 
@@ -75,7 +75,7 @@
     9: "检测到循环，停止重复刚才动作，换方式继续",
   };
 
-  // 设置默认值必须与 autocontinue_hook.py 的 DEFAULT_SETTINGS / 主进程 handler 的
+  // 设置默认值必须与 zcp_hook.py 的 DEFAULT_SETTINGS / 主进程 handler 的
   // default.settings 保持一致（dsh-client-auto-continue 的默认策略）。
   const DEFAULT_SETTINGS = {
     defaultMode: "recover",          // 默认仅故障恢复，不接力正常完成的回合
@@ -491,8 +491,8 @@
   }
 
   function hookPort(port) {
-    if (!port || port.__zpilot) return;
-    port.__zpilot = true;
+    if (!port || port.__zcpCore) return;
+    port.__zcpCore = true;
     // ★ 关键：只注册监听，**绝不调用 port.start()**（见文件头硬约束 1）
     port.addEventListener("message", (ev) => handleFrame(ev.data));
     diag.portHooked = true;
@@ -1078,8 +1078,8 @@
     ensureSettingsStyle();
     const nav = page.querySelector("aside nav") || page.querySelector("nav[aria-label]");
     if (nav) {
-      if (!nav.__zpilotSettingsBound) {
-        nav.__zpilotSettingsBound = true;
+      if (!nav.__zcpCoreSettingsBound) {
+        nav.__zcpCoreSettingsBound = true;
         nav.addEventListener("click", (e) => {
           const nativeItem = e.target && e.target.closest
             ? e.target.closest("[data-settings-section-nav]")
@@ -1266,7 +1266,7 @@
 
   // ============================ 五级写回（崩溃恢复专用） ============================
   // 契约 §2.3.4 要求「复用本仓库已验证的五级方案」。策略：
-  //   ① 首选**直接复用**增强脚本暴露的 `window.__zenhanceDiag.writeText`（零重复，真复用）；
+  //   ① 首选**直接复用**增强脚本暴露的 `window.__zcpPolishDiag.writeText`（零重复，真复用）；
   //   ② 增强脚本未注入时，使用下面这份**逐字照抄**自 zcode-enhance-prompt.js 的同款实现
   //      （React Fiber editorApiRef.setText → Lexical parseEditorState/setEditorState →
   //        合成 paste → execCommand('insertText') → 原生 setter + InputEvent 链）。
@@ -1632,7 +1632,7 @@
   /** 写回 composer：优先复用增强脚本暴露的实现（真复用），否则用上面的同款副本。 */
   function writeIntoComposer(el, text) {
     const shared = safe(() => {
-      const d = window.__zenhanceDiag;
+      const d = window.__zcpPolishDiag;
       return d && typeof d.writeText === "function" ? d.writeText : null;
     }, null);
     if (shared) {
@@ -2007,7 +2007,7 @@
   window.addEventListener("beforeunload", onPageHide);
 
   // 调试出口（热注入/排障用；均为只读或幂等操作）
-  window.__zpilotApi = {
+  window.__zcpCoreApi = {
     refresh: () => refreshState(false),
     state: () => ({ ...st, sessions, journal, settings }),
     ui: () => ({ toggle: !!toggleEl, settingsTab: settingsUiActive }),

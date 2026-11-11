@@ -50,7 +50,7 @@ ZCode 客户端补丁工具
   注入/备份/还原：app.asar.pilot.bak + app.asar.pilot-patch.json。
 
   历史「思考强度滑条」（zcode-thought-slider.js）补丁**已移除**；老用户 app.asar 里
-  可能还留着它的注入产物，用 --cleanup-legacy 一次性外科手术式摘除（sync.py 会自动触发）。
+  可能还留着它的注入产物，用 --cleanup-legacy 一次性外科手术式摘除（zcp_sync.py 会自动触发）。
 
 五、模型拉取按钮（app.asar，--model-puller）
   设置页注入「⚡️ 自动拉取模型」按钮：拉取供应商 /models 接口 → 弹窗勾选 → 写入
@@ -62,7 +62,7 @@ ZCode 客户端补丁工具
   preload/main 锚点用语义字符串定位（exposeInMainWorld("zcode",{ / SaveMcpToUserDirectory），
   压缩符号经正则捕获，跨版本无需维护符号表。
   原件备份 app.asar.puller.bak，记录在 app.asar.puller-patch.json，可整体还原。
-  另有命令行版 scripts/model_pull.py：不动 asar，直接同步 config.json。
+  另有命令行版 scripts/zcp_modelpull.py：不动 asar，直接同步 config.json。
 
 七、增强提示词（app.asar，--enhance-prompt）
   在输入框工具栏注入「增强提示词」按钮：取当前草稿 → 经 preload 桥 / main handler 用
@@ -87,21 +87,21 @@ ZCode 客户端补丁工具
   同一模型同时出现在两个规则列表，否则整个供应商配置会降级为空）。
 
 用法：
-  python zcode_patcher.py --all --check         # 【推荐第一步】一条命令体检全部功能，只读不改
-  python zcode_patcher.py --all                 # 一次打上全部补丁（先完全退出 ZCode）
-  python zcode_patcher.py --all --revert        # 一次还原全部补丁
-  python zcode_patcher.py                       # 思维强度补丁：自动探测全部安装并打（幂等）
-  python zcode_patcher.py --check               # 只看思维强度补丁状态
-  python zcode_patcher.py --revert              # 还原内核备份
-  python zcode_patcher.py --extract             # 提取当前内核锚点（新版本无已知锚点时）
-  python zcode_patcher.py --reasoning-config    # 【3.14+ 推荐】档位写进 provider_config（原生机制，无需内核补丁）
-  python zcode_patcher.py --usage-chart         # 用量页去截断（同样支持 --check/--revert）
-  python zcode_patcher.py --tps-footer          # TPS 统计栏注入（同样支持 --check/--revert）
-  python zcode_patcher.py --auto-continue       # 自动继续注入（同样支持 --check/--revert）
-  python zcode_patcher.py --model-puller        # 模型拉取按钮注入（同样支持 --check/--revert）
-  python zcode_patcher.py --enhance-prompt      # 增强提示词按钮注入（同样支持 --check/--revert）
-  python zcode_patcher.py --cleanup-legacy      # 摘除历史「思考强度滑条」注入残留（--check 只看）
-  python zcode_patcher.py "D:\\ZCode"           # 只处理指定安装（安装根目录或 zcode.cjs 均可）
+  python zcp_patcher.py --all --check         # 【推荐第一步】一条命令体检全部功能，只读不改
+  python zcp_patcher.py --all                 # 一次打上全部补丁（先完全退出 ZCode）
+  python zcp_patcher.py --all --revert        # 一次还原全部补丁
+  python zcp_patcher.py                       # 思维强度补丁：自动探测全部安装并打（幂等）
+  python zcp_patcher.py --check               # 只看思维强度补丁状态
+  python zcp_patcher.py --revert              # 还原内核备份
+  python zcp_patcher.py --extract             # 提取当前内核锚点（新版本无已知锚点时）
+  python zcp_patcher.py --reasoning-config    # 【3.14+ 推荐】档位写进 provider_config（原生机制，无需内核补丁）
+  python zcp_patcher.py --usage-chart         # 用量页去截断（同样支持 --check/--revert）
+  python zcp_patcher.py --tps-footer          # TPS 统计栏注入（同样支持 --check/--revert）
+  python zcp_patcher.py --auto-continue       # 自动继续注入（同样支持 --check/--revert）
+  python zcp_patcher.py --model-puller        # 模型拉取按钮注入（同样支持 --check/--revert）
+  python zcp_patcher.py --enhance-prompt      # 增强提示词按钮注入（同样支持 --check/--revert）
+  python zcp_patcher.py --cleanup-legacy      # 摘除历史「思考强度滑条」注入残留（--check 只看）
+  python zcp_patcher.py "D:\\ZCode"           # 只处理指定安装（安装根目录或 zcode.cjs 均可）
 
 通用开关：
   --all       对所有功能生效（等价于同时给出下面全部补丁参数；配合 --check / --revert 用）
@@ -132,11 +132,11 @@ import threading
 import time
 from pathlib import Path, PureWindowsPath
 
-try:                                   # 控制台编码/窗口安全网（见 _console.py 的说明）
-    from _console import bad_mark, no_window_kwargs, ok_mark, safe_stdio
+try:                                   # 控制台编码/窗口安全网（见 zcp_console.py 的说明）
+    from zcp_console import bad_mark, no_window_kwargs, ok_mark, safe_stdio
 except ImportError:                    # 被别处 import 时脚本目录可能不在 sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _console import bad_mark, no_window_kwargs, ok_mark, safe_stdio
+    from zcp_console import bad_mark, no_window_kwargs, ok_mark, safe_stdio
 
 # 全部补丁的命令行参数名：--all 会一次性把它们打开（新增补丁时只需加进这里）
 ALL_PATCH_FLAGS = (
@@ -632,7 +632,7 @@ def process(target: Path, check_only: bool, revert: bool, *,
                 print("    [!] 当前内核与备份不是同一版本（客户端可能已升级）——"
                       "还原会把旧版内核盖回新客户端，已拒绝")
                 print(f"        备份版本 {meta.get('zcode_version') or '未知'}；"
-                      f"确需强行还原加 --force，恢复出厂请用 scripts/restore_clean.py")
+                      f"确需强行还原加 --force，恢复出厂请用 scripts/zcp_restore.py")
                 return False
         if dry_run:
             print(f"    [~] 将用备份还原 {len(bak):,} 字节")
@@ -942,7 +942,7 @@ def process_model_width(asar: Path, check_only: bool, revert: bool, *,
     """【已下线】模型选择弹窗加宽：把 Tailwind 宽度类 w-48(192px) 换成 w-80(320px)。
 
     不再随 `--all` 安装，也不再出现在插件配置页；保留此函数只为让老客户端里残留的
-    字节改动可以 `--model-width --revert` 精确还原（sync.py 检测到残留会自动排一次）。
+    字节改动可以 `--model-width --revert` 精确还原（zcp_sync.py 检测到残留会自动排一次）。
     与图表补丁同为「同长度字节级原地覆盖」（w-48/w-80 字面量等长），零重打包。
     返回 True=成功/无需改动，False=失败。"""
     side = asar.with_name(asar.name + ".width-patch.json")
@@ -1551,7 +1551,7 @@ def _pilot_main_block(ipc_alias: str) -> bytes:
     一律用动态 import；状态文件是唯一权威，缺文件/缺字段按契约默认值补齐。
 
     ⚠️ 状态文件是**多方共用**的（见 docs/CONTRACT.md 2.2）：enabled/paused/cancelToken 归
-    sync.py，lastContinueAt/sessions[sid].consecutive 归 Stop hook，
+    zcp_sync.py，lastContinueAt/sessions[sid].consecutive 归 Stop hook，
     sessions[sid].mode/settings/journal 归渲染层。
     所以这里严格读-改-写：以**文件内容**为基（未知字段原样保留），只合并 patch 里给的字段；
     额外的 `sessionMode` patch 会落到 `sessions[id].mode`，`settings` 逐键校验合并；
@@ -1560,7 +1560,7 @@ def _pilot_main_block(ipc_alias: str) -> bytes:
     return _wrap_block(PILOT_BLOCK, _PILOT_MAIN_HANDLER.replace("__H__", ipc_alias).encode())
 
 
-# 状态文件默认值必须与 docs/CONTRACT.md 2.2 / autocontinue_hook.py 的 DEFAULT_SETTINGS 一致
+# 状态文件默认值必须与 docs/CONTRACT.md 2.2 / zcp_hook.py 的 DEFAULT_SETTINGS 一致
 # （enabled 与插件清单默认值相同 = true；settings 采用 dsh-client-auto-continue 的默认策略）。
 _PILOT_MAIN_HANDLER = r'''
 __H__.handle("zcode:pilot-state",async(ev,patch)=>{
@@ -1809,7 +1809,7 @@ let k=String(pick.p.options.apiKey||"");
 if(!u)return{success:!1,code:"no-baseurl",error:"供应商「"+pick.pid+"」没有填 Base URL"};
 if(!k)return{success:!1,code:"no-key",error:"供应商「"+pick.pid+"」没有填 API Key"};
 // 把命中档位带到返回值：cand() 已把档名存在 pick.how（config/ref/ref-label/label/fallback）。
-// 排障时 `window.__zenhanceDiag.lastResult.how` 靠它判断走的是哪一档 —— 不赋值会恒为空串。
+// 排障时 `window.__zcpPolishDiag.lastResult.how` 靠它判断走的是哪一档 —— 不赋值会恒为空串。
 how=String(pick.how||"");
 let kind=String(pick.p.kind||"openai-compatible");
 let sys=__SYS__,tpl=__TPL__;
@@ -2066,7 +2066,7 @@ def _replace_with_retry(tmp: Path, dst: Path, attempts: int = 5) -> None:
 class _AsarWriteLock:
     """跨进程 + 跨线程互斥锁：保护对同一个 asar 的「读 header → 排布 → 写数据 → 原子替换」全程。
 
-    ★ 为什么必须有（2026-09-23 事故）：看护（apply_after_exit）与手动 / 流水线可能
+    ★ 为什么必须有（2026-09-23 事故）：看护（zcp_watchdog）与手动 / 流水线可能
       同时对同一个 app.asar 调 `_repack_asar`。两个进程各自读到一份 header、各自算
       offset，交错落盘后就会产出「数据区按 A 的布局、header 按 B 的布局」的错位文件 ——
       表现为 offset 整体偏移固定字节数、integrity 全部失配，Electron 静默拒绝加载。
@@ -2451,7 +2451,7 @@ def _process_script_inject(asar: Path, check_only: bool, revert: bool, src_path:
     if check_only:
         state = "已打" if installed else ("不完整（index.html 有 tag 但缺脚本条目）" if tagged else "未打")
         # 已注入、但脚本内容与现行源不一致 → 必须显式报 stale。
-        # 只按「结构在不在」判会输出裸「已打」，sync.check_state() 据此判 on → run_sync 走
+        # 只按「结构在不在」判会输出裸「已打」，zcp_sync.check_state() 据此判 on → run_sync 走
         # `continue`（视为已一致）→ 脚本改了**永远不生效，而且一句报错都没有**。
         # 特征串必须与模型拉取链路（--model-puller）逐字一致：check_state() 只认「含旧版组件」。
         if installed and src_path.is_file() and \

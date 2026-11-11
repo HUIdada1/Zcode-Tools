@@ -99,16 +99,16 @@ class UiGlassSmoke(unittest.TestCase):
                          "模型弹窗加宽的 CSS 覆盖必须删掉")
 
     def test_model_width_is_offline_everywhere(self):
-        import apply_after_exit as aae
-        import sync
-        import zcode_patcher as zp
+        import zcp_watchdog as aae
+        import zcp_sync
+        import zcp_patcher as zp
 
         self.assertNotIn("model_width", zp.ALL_PATCH_FLAGS,
                          "已下线的 model_width 不能回到 --all 安装列表")
         self.assertIn("model_width", zp.LEGACY_PATCH_FLAGS,
                       "必须保留 --all --revert 的 legacy 还原能力")
-        self.assertNotIn("model_width", [k for k, _a, _r in sync.PATCHES],
-                         "sync 不能再把 model_width 当可安装功能")
+        self.assertNotIn("model_width", [k for k, _a, _r in zcp_sync.PATCHES],
+                         "zcp_sync 不能再把 model_width 当可安装功能")
         self.assertNotIn("model_width", aae.PATCH_ARGS,
                          "看护不能把 model_width 当可安装功能")
         self.assertIn("cleanup_model_width", aae.PATCH_ARGS,
@@ -120,17 +120,17 @@ class UiGlassSmoke(unittest.TestCase):
                                  "cleanup_model_width=off 必须转成 --model-width --revert")
 
     def test_sync_schedules_one_time_model_width_revert(self):
-        import sync
+        import zcp_sync
 
         captured = {}
-        with patch.object(sync, "resolve_wanted", return_value=({"model_width": True}, "test")), \
-             patch.object(sync, "check_state", return_value="on"), \
-             patch.object(sync, "start_watchdog", side_effect=lambda w: captured.update(w)), \
-             patch.object(sync, "log", return_value=None), \
-             patch.object(sync, "write_inject_record", return_value=None), \
-             patch.object(sync, "mark_reinject_pending", return_value=None), \
-             patch.object(sync, "clear_reinject_pending", return_value=None):
-            sync.run_sync()
+        with patch.object(zcp_sync, "resolve_wanted", return_value=({"model_width": True}, "test")), \
+             patch.object(zcp_sync, "check_state", return_value="on"), \
+             patch.object(zcp_sync, "start_watchdog", side_effect=lambda w: captured.update(w)), \
+             patch.object(zcp_sync, "log", return_value=None), \
+             patch.object(zcp_sync, "write_inject_record", return_value=None), \
+             patch.object(zcp_sync, "mark_reinject_pending", return_value=None), \
+             patch.object(zcp_sync, "clear_reinject_pending", return_value=None):
+            zcp_sync.run_sync()
         self.assertEqual(captured.get("cleanup_model_width"), False,
                          "检测到残留时必须排一次清理（enabled=False → --model-width --revert）")
         self.assertNotIn("model_width", captured,

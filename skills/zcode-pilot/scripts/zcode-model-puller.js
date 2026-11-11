@@ -1,6 +1,6 @@
 /**
  * MIT License — Copyright (c) HHQ-666（完整许可声明见仓库根目录 NOTICE.md）
- * 由 zcode_patcher.py --model-puller 注入到 out/renderer/；配套的 preload 桥与 main IPC handler
+ * 由 zcp_patcher.py --model-puller 注入到 out/renderer/；配套的 preload 桥与 main IPC handler
  * 在 patcher 内置（锚点：exposeInMainWorld("zcode",{ / SaveMcpToUserDirectory）。
  */
 /**
@@ -14,8 +14,8 @@
  * 5. 跨进程安全 IPC 桥梁：原生无 CORS 限制、极速安全持久化
  */
 (() => {
-  if (window.__ZCODE_MODEL_PULLER_LOADED_PRO__) return;
-  window.__ZCODE_MODEL_PULLER_LOADED_PRO__ = true;
+  if (window.__ZCP_PULLER_LOADED__) return;
+  window.__ZCP_PULLER_LOADED__ = true;
 
   console.log("[ZCode-Model-Puller] 开源旗舰版插件已装载");
 
@@ -121,13 +121,13 @@
       cursor: wait;
       pointer-events: none;
     }
-    .zcode-pull-bolt-icon {
+    .zcp-pull-bolt-icon {
       width: 15px;
       height: 15px;
       fill: currentColor;
       transition: transform 0.2s;
     }
-    #zcode-auto-pull-models-btn:hover .zcode-pull-bolt-icon {
+    #zcode-auto-pull-models-btn:hover .zcp-pull-bolt-icon {
       transform: scale(1.15);
     }
 
@@ -140,7 +140,7 @@
     }
 
     /* 弹窗遮罩 */
-    .zcode-pull-modal-overlay {
+    .zcp-pull-modal-overlay {
       position: fixed;
       inset: 0;
       z-index: 999999;
@@ -156,7 +156,7 @@
       from { opacity: 0; }
       to { opacity: 1; }
     }
-    .zcode-pull-modal {
+    .zcp-pull-modal {
       width: 580px;
       max-width: 92vw;
       max-height: 85vh;
@@ -174,7 +174,7 @@
       from { opacity: 0; transform: scale(0.96); }
       to { opacity: 1; transform: scale(1); }
     }
-    .zcode-pull-header {
+    .zcp-pull-header {
       padding: 16px 20px;
       background: var(--zpull-header-bg);
       border-bottom: 1px solid var(--zpull-border);
@@ -182,7 +182,7 @@
       justify-content: space-between;
       align-items: center;
     }
-    .zcode-pull-title {
+    .zcp-pull-title {
       font-size: 16px;
       font-weight: 600;
       color: var(--zpull-fg);
@@ -190,7 +190,7 @@
       align-items: center;
       gap: 8px;
     }
-    .zcode-pull-close {
+    .zcp-pull-close {
       background: transparent;
       border: none;
       color: var(--zpull-fg-muted);
@@ -203,11 +203,11 @@
       justify-content: center;
       transition: all 0.15s;
     }
-    .zcode-pull-close:hover {
+    .zcp-pull-close:hover {
       background: var(--zpull-item-hover);
       color: var(--zpull-fg);
     }
-    .zcode-pull-body {
+    .zcp-pull-body {
       padding: 16px 20px;
       overflow-y: hidden;
       flex: 1;
@@ -215,13 +215,13 @@
       flex-direction: column;
       gap: 12px;
     }
-    .zcode-pull-toolbar {
+    .zcp-pull-toolbar {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 8px;
     }
-    .zcode-pull-search {
+    .zcp-pull-search {
       flex: 1;
       background: var(--zpull-input-bg);
       border: 1px solid var(--zpull-input-border);
@@ -232,14 +232,14 @@
       outline: none;
       transition: border-color 0.15s;
     }
-    .zcode-pull-search:focus {
+    .zcp-pull-search:focus {
       border-color: #3b82f6;
     }
-    .zcode-pull-btn-group {
+    .zcp-pull-btn-group {
       display: flex;
       gap: 6px;
     }
-    .zcode-pull-mini-btn {
+    .zcp-pull-mini-btn {
       background: var(--zpull-btn-cancel-bg);
       border: 1px solid var(--zpull-btn-cancel-border);
       color: var(--zpull-fg);
@@ -250,10 +250,10 @@
       white-space: nowrap;
       transition: all 0.15s;
     }
-    .zcode-pull-mini-btn:hover {
+    .zcp-pull-mini-btn:hover {
       background: var(--zpull-btn-cancel-hover);
     }
-    .zcode-pull-list {
+    .zcp-pull-list {
       flex: 1;
       max-height: 380px;
       overflow-y: auto;
@@ -261,7 +261,7 @@
       border-radius: 8px;
       background: var(--zpull-list-bg);
     }
-    .zcode-pull-item {
+    .zcp-pull-item {
       display: flex;
       align-items: center;
       padding: 9px 12px;
@@ -270,13 +270,13 @@
       transition: background 0.1s;
       border-bottom: 1px solid var(--zpull-border-subtle);
     }
-    .zcode-pull-item:last-child {
+    .zcp-pull-item:last-child {
       border-bottom: none;
     }
-    .zcode-pull-item:hover {
+    .zcp-pull-item:hover {
       background: var(--zpull-item-hover);
     }
-    .zcode-pull-item input[type="checkbox"] {
+    .zcp-pull-item input[type="checkbox"] {
       margin-right: 12px;
       accent-color: #2563eb;
       width: 16px;
@@ -284,29 +284,29 @@
       cursor: pointer;
       pointer-events: none;
     }
-    .zcode-pull-item-name {
+    .zcp-pull-item-name {
       flex: 1;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 13px;
       color: var(--zpull-fg);
     }
-    .zcode-pull-badge {
+    .zcp-pull-badge {
       font-size: 11px;
       padding: 2px 7px;
       border-radius: 4px;
       font-weight: 500;
     }
-    .zcode-pull-badge-new {
+    .zcp-pull-badge-new {
       background: var(--zpull-badge-new-bg);
       color: var(--zpull-badge-new-fg);
       border: 1px solid var(--zpull-badge-new-border);
     }
-    .zcode-pull-badge-exists {
+    .zcp-pull-badge-exists {
       background: var(--zpull-badge-exists-bg);
       color: var(--zpull-badge-exists-fg);
       border: 1px solid var(--zpull-badge-exists-border);
     }
-    .zcode-pull-footer {
+    .zcp-pull-footer {
       padding: 14px 20px;
       background: var(--zpull-footer-bg);
       border-top: 1px solid var(--zpull-border);
@@ -314,15 +314,15 @@
       justify-content: space-between;
       align-items: center;
     }
-    .zcode-pull-count-info {
+    .zcp-pull-count-info {
       font-size: 13px;
       color: var(--zpull-fg-muted);
     }
-    .zcode-pull-footer-btns {
+    .zcp-pull-footer-btns {
       display: flex;
       gap: 10px;
     }
-    .zcode-pull-btn-cancel {
+    .zcp-pull-btn-cancel {
       padding: 7px 16px;
       border-radius: 8px;
       font-size: 13px;
@@ -333,10 +333,10 @@
       cursor: pointer;
       transition: all 0.15s;
     }
-    .zcode-pull-btn-cancel:hover {
+    .zcp-pull-btn-cancel:hover {
       background: var(--zpull-btn-cancel-hover);
     }
-    .zcode-pull-btn-submit {
+    .zcp-pull-btn-submit {
       padding: 7px 18px;
       border-radius: 8px;
       font-size: 13px;
@@ -350,10 +350,10 @@
       gap: 6px;
       transition: all 0.15s;
     }
-    .zcode-pull-btn-submit:hover {
+    .zcp-pull-btn-submit:hover {
       background: #1d4ed8;
     }
-    .zcode-pull-btn-submit:disabled {
+    .zcp-pull-btn-submit:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
@@ -445,18 +445,18 @@
     #zcode-auto-pull-models-btn:active{transform:translateY(0) scale(.99)}
     #zcode-auto-pull-models-btn:focus-visible{outline:none;box-shadow:var(--zpg-focus),inset 0 1px 0 rgba(255,255,255,.35)}
     #zcode-auto-pull-models-btn.loading{opacity:.72;cursor:wait;pointer-events:none}
-    .zcode-pull-icon-wrap{
+    .zcp-pull-icon-wrap{
       width:22px;height:22px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;
       background:rgba(16,185,129,.18);box-shadow:inset 0 0 0 1px rgba(16,185,129,.28);
       transition:transform .22s var(--zpg-ease),background .22s var(--zpg-ease);
     }
-    #zcode-auto-pull-models-btn:hover .zcode-pull-icon-wrap{transform:scale(1.06);background:rgba(16,185,129,.24)}
-    .zcode-pull-bolt-icon{width:13px;height:13px;fill:currentColor}
+    #zcode-auto-pull-models-btn:hover .zcp-pull-icon-wrap{transform:scale(1.06);background:rgba(16,185,129,.24)}
+    .zcp-pull-bolt-icon{width:13px;height:13px;fill:currentColor}
     @keyframes zcodeSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
     .zcode-spin-icon{animation:zcodeSpin .9s linear infinite}
 
     /* ---------- 遮罩：深色玻璃，聚焦弹窗 ---------- */
-    .zcode-pull-modal-overlay{
+    .zcp-pull-modal-overlay{
       position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;
       background:rgba(3,8,6,.52);
       -webkit-backdrop-filter:blur(18px) saturate(145%);backdrop-filter:blur(18px) saturate(145%);
@@ -466,7 +466,7 @@
     @keyframes zcodeFadeIn{from{opacity:0}to{opacity:1}}
 
     /* ---------- 弹窗：双框玻璃 + 环境绿光 ---------- */
-    .zcode-pull-modal{
+    .zcp-pull-modal{
       position:relative;width:600px;max-width:92vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;
       border-radius:20px;border:1px solid var(--zpg-line-2);
       background:var(--zpg-glass);color:var(--zpg-ink);
@@ -474,81 +474,81 @@
       -webkit-backdrop-filter:blur(28px) saturate(165%);backdrop-filter:blur(28px) saturate(165%);
       animation:zcodeScaleIn .26s var(--zpg-ease);
     }
-    .zcode-pull-modal::before{
+    .zcp-pull-modal::before{
       content:"";position:absolute;inset:0;pointer-events:none;
       background:radial-gradient(120% 80% at 0% 0%,rgba(16,185,129,.16),transparent 56%);
     }
     @keyframes zcodeScaleIn{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:none}}
-    .zcode-pull-header{
+    .zcp-pull-header{
       position:relative;z-index:1;padding:18px 20px 14px;display:flex;align-items:center;justify-content:space-between;gap:14px;
       border-bottom:1px solid var(--zpg-line);background:transparent;
     }
-    .zcode-pull-title{display:flex;align-items:center;gap:11px;min-width:0;color:var(--zpg-ink);font-size:15px;font-weight:650;letter-spacing:.01em}
-    .zcode-pull-title .zcode-pull-icon-wrap{width:30px;height:30px;flex:0 0 auto;background:rgba(16,185,129,.16);box-shadow:inset 0 0 0 1px rgba(16,185,129,.26)}
-    .zcode-pull-title .zcode-pull-bolt-icon{width:16px;height:16px}
-    .zcode-pull-heading{display:flex;flex-direction:column;gap:3px;min-width:0}
-    .zcode-pull-heading-main{font-size:15px;font-weight:650;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .zcode-pull-sub{font-size:11px;font-weight:500;color:var(--zpg-muted);letter-spacing:.02em}
-    .zcode-pull-close{
+    .zcp-pull-title{display:flex;align-items:center;gap:11px;min-width:0;color:var(--zpg-ink);font-size:15px;font-weight:650;letter-spacing:.01em}
+    .zcp-pull-title .zcp-pull-icon-wrap{width:30px;height:30px;flex:0 0 auto;background:rgba(16,185,129,.16);box-shadow:inset 0 0 0 1px rgba(16,185,129,.26)}
+    .zcp-pull-title .zcp-pull-bolt-icon{width:16px;height:16px}
+    .zcp-pull-heading{display:flex;flex-direction:column;gap:3px;min-width:0}
+    .zcp-pull-heading-main{font-size:15px;font-weight:650;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .zcp-pull-sub{font-size:11px;font-weight:500;color:var(--zpg-muted);letter-spacing:.02em}
+    .zcp-pull-close{
       flex:0 0 auto;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;
       background:rgba(127,127,127,.08);border:1px solid transparent;border-radius:999px;
       color:var(--zpg-muted);font-size:15px;line-height:1;cursor:pointer;
       transition:background .2s var(--zpg-ease),color .2s var(--zpg-ease),transform .2s var(--zpg-ease),box-shadow .2s var(--zpg-ease);
     }
-    .zcode-pull-close:hover{background:var(--zpg-surface);color:var(--zpg-accent-ink);box-shadow:inset 0 0 0 1px var(--zpg-line-2);transform:rotate(90deg)}
-    .zcode-pull-body{position:relative;z-index:1;padding:16px 20px;overflow:hidden;flex:1;display:flex;flex-direction:column;gap:12px}
-    .zcode-pull-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px}
-    .zcode-pull-search{
+    .zcp-pull-close:hover{background:var(--zpg-surface);color:var(--zpg-accent-ink);box-shadow:inset 0 0 0 1px var(--zpg-line-2);transform:rotate(90deg)}
+    .zcp-pull-body{position:relative;z-index:1;padding:16px 20px;overflow:hidden;flex:1;display:flex;flex-direction:column;gap:12px}
+    .zcp-pull-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .zcp-pull-search{
       flex:1;min-width:0;box-sizing:border-box;background:var(--zpg-glass-soft);border:1px solid var(--zpg-line);border-radius:12px;
       padding:9px 13px;color:var(--zpg-ink);font-family:var(--zpg-sans);font-size:13px;outline:none;
       box-shadow:inset 0 1px 0 rgba(255,255,255,.28);
       transition:border-color .2s var(--zpg-ease),box-shadow .2s var(--zpg-ease),background .2s var(--zpg-ease);
     }
-    .zcode-pull-search::placeholder{color:var(--zpg-soft)}
-    .zcode-pull-search:focus{border-color:var(--zpg-accent);box-shadow:var(--zpg-focus),inset 0 1px 0 rgba(255,255,255,.32)}
-    .zcode-pull-btn-group{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
-    .zcode-pull-mini-btn{
+    .zcp-pull-search::placeholder{color:var(--zpg-soft)}
+    .zcp-pull-search:focus{border-color:var(--zpg-accent);box-shadow:var(--zpg-focus),inset 0 1px 0 rgba(255,255,255,.32)}
+    .zcp-pull-btn-group{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+    .zcp-pull-mini-btn{
       background:rgba(127,127,127,.08);border:1px solid var(--zpg-line);border-radius:999px;
       color:var(--zpg-ink);font-family:var(--zpg-sans);font-size:11.5px;font-weight:550;padding:6px 11px;
       cursor:pointer;white-space:nowrap;
       transition:background .2s var(--zpg-ease),color .2s var(--zpg-ease),transform .2s var(--zpg-ease),box-shadow .2s var(--zpg-ease);
     }
-    .zcode-pull-mini-btn:hover{background:var(--zpg-surface);color:var(--zpg-accent-ink);box-shadow:inset 0 0 0 1px var(--zpg-line-2)}
-    .zcode-pull-mini-btn:active{transform:scale(.98)}
-    .zcode-pull-list{
+    .zcp-pull-mini-btn:hover{background:var(--zpg-surface);color:var(--zpg-accent-ink);box-shadow:inset 0 0 0 1px var(--zpg-line-2)}
+    .zcp-pull-mini-btn:active{transform:scale(.98)}
+    .zcp-pull-list{
       flex:1;max-height:380px;overflow-y:auto;overscroll-behavior:contain;
       border:1px solid var(--zpg-line);border-radius:14px;background:var(--zpg-glass-soft);
       box-shadow:inset 0 1px 0 rgba(255,255,255,.22);
     }
-    .zcode-pull-list::-webkit-scrollbar{width:8px}
-    .zcode-pull-list::-webkit-scrollbar-thumb{background:rgba(16,185,129,.26);border-radius:999px;border:2px solid transparent;background-clip:padding-box}
-    .zcode-pull-list::-webkit-scrollbar-track{background:transparent}
-    .zcode-pull-item{
+    .zcp-pull-list::-webkit-scrollbar{width:8px}
+    .zcp-pull-list::-webkit-scrollbar-thumb{background:rgba(16,185,129,.26);border-radius:999px;border:2px solid transparent;background-clip:padding-box}
+    .zcp-pull-list::-webkit-scrollbar-track{background:transparent}
+    .zcp-pull-item{
       display:flex;align-items:center;padding:10px 13px;cursor:pointer;user-select:none;
       border-bottom:1px solid var(--zpg-line);
       transition:background .18s var(--zpg-ease),transform .18s var(--zpg-ease);
     }
-    .zcode-pull-item:last-child{border-bottom:none}
-    .zcode-pull-item:hover{background:var(--zpg-surface);transform:translateX(1px)}
-    .zcode-pull-item input[type="checkbox"]{margin-right:12px;accent-color:var(--zpg-accent);width:16px;height:16px;cursor:pointer;pointer-events:none}
-    .zcode-pull-item-name{flex:1;min-width:0;font-family:var(--zpg-mono);font-size:12.5px;color:var(--zpg-ink);letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .zcode-pull-badge{font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:999px;letter-spacing:.02em;white-space:nowrap}
-    .zcode-pull-badge-new{background:rgba(16,185,129,.14);color:var(--zpg-accent-ink);box-shadow:inset 0 0 0 1px var(--zpg-line-2)}
-    .zcode-pull-badge-exists{background:rgba(127,127,127,.10);color:var(--zpg-muted);box-shadow:inset 0 0 0 1px rgba(127,127,127,.14)}
-    .zcode-pull-footer{
+    .zcp-pull-item:last-child{border-bottom:none}
+    .zcp-pull-item:hover{background:var(--zpg-surface);transform:translateX(1px)}
+    .zcp-pull-item input[type="checkbox"]{margin-right:12px;accent-color:var(--zpg-accent);width:16px;height:16px;cursor:pointer;pointer-events:none}
+    .zcp-pull-item-name{flex:1;min-width:0;font-family:var(--zpg-mono);font-size:12.5px;color:var(--zpg-ink);letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .zcp-pull-badge{font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:999px;letter-spacing:.02em;white-space:nowrap}
+    .zcp-pull-badge-new{background:rgba(16,185,129,.14);color:var(--zpg-accent-ink);box-shadow:inset 0 0 0 1px var(--zpg-line-2)}
+    .zcp-pull-badge-exists{background:rgba(127,127,127,.10);color:var(--zpg-muted);box-shadow:inset 0 0 0 1px rgba(127,127,127,.14)}
+    .zcp-pull-footer{
       position:relative;z-index:1;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;
       border-top:1px solid var(--zpg-line);background:transparent;
     }
-    .zcode-pull-count-info{font-size:12px;color:var(--zpg-muted);letter-spacing:.01em}
-    .zcode-pull-count-info strong{color:var(--zpg-accent-ink);font-weight:650}
-    .zcode-pull-footer-btns{display:flex;gap:9px}
-    .zcode-pull-btn-cancel{
+    .zcp-pull-count-info{font-size:12px;color:var(--zpg-muted);letter-spacing:.01em}
+    .zcp-pull-count-info strong{color:var(--zpg-accent-ink);font-weight:650}
+    .zcp-pull-footer-btns{display:flex;gap:9px}
+    .zcp-pull-btn-cancel{
       padding:8px 17px;border-radius:999px;font-family:var(--zpg-sans);font-size:12.5px;font-weight:600;
       background:rgba(127,127,127,.08);border:1px solid var(--zpg-line);color:var(--zpg-ink);cursor:pointer;
       transition:background .2s var(--zpg-ease),color .2s var(--zpg-ease),transform .2s var(--zpg-ease);
     }
-    .zcode-pull-btn-cancel:hover{background:var(--zpg-surface);color:var(--zpg-accent-ink);transform:translateY(-1px)}
-    .zcode-pull-btn-submit{
+    .zcp-pull-btn-cancel:hover{background:var(--zpg-surface);color:var(--zpg-accent-ink);transform:translateY(-1px)}
+    .zcp-pull-btn-submit{
       padding:8px 18px;border-radius:999px;font-family:var(--zpg-sans);font-size:12.5px;font-weight:650;
       display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:#fff;
       background:linear-gradient(180deg,var(--zpg-accent),var(--zpg-accent-2));
@@ -556,10 +556,10 @@
       box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 6px 18px rgba(16,185,129,.24);
       transition:transform .2s var(--zpg-ease),box-shadow .2s var(--zpg-ease),filter .2s var(--zpg-ease);
     }
-    .zcode-pull-btn-submit:hover{transform:translateY(-1px);filter:brightness(1.04);box-shadow:inset 0 1px 0 rgba(255,255,255,.40),0 10px 24px rgba(16,185,129,.30)}
-    .zcode-pull-btn-submit:active{transform:translateY(0) scale(.99)}
-    .zcode-pull-btn-submit:focus-visible{outline:none;box-shadow:var(--zpg-focus),0 6px 18px rgba(16,185,129,.24)}
-    .zcode-pull-btn-submit:disabled{opacity:.45;cursor:not-allowed;transform:none;filter:none;box-shadow:none}
+    .zcp-pull-btn-submit:hover{transform:translateY(-1px);filter:brightness(1.04);box-shadow:inset 0 1px 0 rgba(255,255,255,.40),0 10px 24px rgba(16,185,129,.30)}
+    .zcp-pull-btn-submit:active{transform:translateY(0) scale(.99)}
+    .zcp-pull-btn-submit:focus-visible{outline:none;box-shadow:var(--zpg-focus),0 6px 18px rgba(16,185,129,.24)}
+    .zcp-pull-btn-submit:disabled{opacity:.45;cursor:not-allowed;transform:none;filter:none;box-shadow:none}
     .zcode-custom-toast{
       position:fixed;top:26px;left:50%;transform:translateX(-50%);z-index:1000000;
       background:var(--zpg-glass);color:var(--zpg-ink);padding:11px 18px;border-radius:999px;
@@ -570,8 +570,8 @@
     }
     @keyframes zcodeToastPop{from{opacity:0;transform:translate(-50%,-10px) scale(.98)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
     @media (prefers-reduced-motion:reduce){
-      #zcode-auto-pull-models-btn,.zcode-pull-modal,.zcode-pull-modal-overlay,.zcode-custom-toast{animation:none!important;transition:none!important}
-      #zcode-auto-pull-models-btn:hover,.zcode-pull-close:hover,.zcode-pull-item:hover{transform:none}
+      #zcode-auto-pull-models-btn,.zcp-pull-modal,.zcp-pull-modal-overlay,.zcode-custom-toast{animation:none!important;transition:none!important}
+      #zcode-auto-pull-models-btn:hover,.zcp-pull-close:hover,.zcp-pull-item:hover{transform:none}
     }
   `;
   document.head.appendChild(glass);
@@ -825,42 +825,42 @@
     }
 
     const overlay = document.createElement("div");
-    overlay.className = "zcode-pull-modal-overlay";
+    overlay.className = "zcp-pull-modal-overlay";
 
     overlay.innerHTML = `
-      <div class="zcode-pull-modal" role="dialog" aria-modal="true" aria-label="选择要同步的模型">
-        <div class="zcode-pull-header">
-          <div class="zcode-pull-title">
-            <span class="zcode-pull-icon-wrap">
-              <svg class="zcode-pull-bolt-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <div class="zcp-pull-modal" role="dialog" aria-modal="true" aria-label="选择要同步的模型">
+        <div class="zcp-pull-header">
+          <div class="zcp-pull-title">
+            <span class="zcp-pull-icon-wrap">
+              <svg class="zcp-pull-bolt-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
               </svg>
             </span>
-            <span class="zcode-pull-heading">
-              <span class="zcode-pull-heading-main">选择要同步的模型</span>
-              <span class="zcode-pull-sub">共 ${models.length} 个 · 待添加 ${newCount} 个</span>
+            <span class="zcp-pull-heading">
+              <span class="zcp-pull-heading-main">选择要同步的模型</span>
+              <span class="zcp-pull-sub">共 ${models.length} 个 · 待添加 ${newCount} 个</span>
             </span>
           </div>
-          <button class="zcode-pull-close" id="zcode-modal-close-btn" title="关闭" aria-label="关闭">✕</button>
+          <button class="zcp-pull-close" id="zcode-modal-close-btn" title="关闭" aria-label="关闭">✕</button>
         </div>
-        <div class="zcode-pull-body">
-          <div class="zcode-pull-toolbar">
-            <input type="text" class="zcode-pull-search" id="zcode-modal-search" placeholder="搜索模型名称..." />
-            <div class="zcode-pull-btn-group">
-              <button class="zcode-pull-mini-btn" id="zcode-select-all">全选</button>
-              <button class="zcode-pull-mini-btn" id="zcode-select-none">清空</button>
-              <button class="zcode-pull-mini-btn" id="zcode-select-new">仅选新模型 (${newCount})</button>
+        <div class="zcp-pull-body">
+          <div class="zcp-pull-toolbar">
+            <input type="text" class="zcp-pull-search" id="zcode-modal-search" placeholder="搜索模型名称..." />
+            <div class="zcp-pull-btn-group">
+              <button class="zcp-pull-mini-btn" id="zcode-select-all">全选</button>
+              <button class="zcp-pull-mini-btn" id="zcode-select-none">清空</button>
+              <button class="zcp-pull-mini-btn" id="zcode-select-new">仅选新模型 (${newCount})</button>
             </div>
           </div>
-          <div class="zcode-pull-list" id="zcode-modal-list"></div>
+          <div class="zcp-pull-list" id="zcode-modal-list"></div>
         </div>
-        <div class="zcode-pull-footer">
-          <div class="zcode-pull-count-info" id="zcode-pull-count-info">
+        <div class="zcp-pull-footer">
+          <div class="zcp-pull-count-info" id="zcp-pull-count-info">
             已选中 <strong id="zcode-selected-num">${newCount}</strong> / ${models.length} 个模型
           </div>
-          <div class="zcode-pull-footer-btns">
-            <button class="zcode-pull-btn-cancel" id="zcode-modal-cancel">取消</button>
-            <button class="zcode-pull-btn-submit" id="zcode-modal-confirm" ${
+          <div class="zcp-pull-footer-btns">
+            <button class="zcp-pull-btn-cancel" id="zcode-modal-cancel">取消</button>
+            <button class="zcp-pull-btn-submit" id="zcode-modal-confirm" ${
               newCount === 0 ? "disabled" : ""
             }>
               <span>确认添加并保存 (<span id="zcode-btn-selected-num">${newCount}</span>)</span>
@@ -877,18 +877,18 @@
     for (const id of models) {
       const info = stateMap.get(id);
       const item = document.createElement("div");
-      item.className = "zcode-pull-item";
+      item.className = "zcp-pull-item";
       item.setAttribute("data-id", id);
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = !!info.selected;
       cb.setAttribute("data-id", id);
       const nameEl = document.createElement("span");
-      nameEl.className = "zcode-pull-item-name";
+      nameEl.className = "zcp-pull-item-name";
       nameEl.textContent = id;
       const badge = document.createElement("span");
-      badge.className = "zcode-pull-badge " +
-        (info.exists ? "zcode-pull-badge-exists" : "zcode-pull-badge-new");
+      badge.className = "zcp-pull-badge " +
+        (info.exists ? "zcp-pull-badge-exists" : "zcp-pull-badge-new");
       badge.textContent = info.exists ? "已添加" : "新模型";
       item.append(cb, nameEl, badge);
       listEl.appendChild(item);
@@ -910,7 +910,7 @@
 
     const listContainer = overlay.querySelector("#zcode-modal-list");
     listContainer.addEventListener("click", (e) => {
-      const itemEl = e.target.closest(".zcode-pull-item");
+      const itemEl = e.target.closest(".zcp-pull-item");
       if (!itemEl) return;
       const id = itemEl.getAttribute("data-id");
       const info = stateMap.get(id);
@@ -925,7 +925,7 @@
     const searchInput = overlay.querySelector("#zcode-modal-search");
     searchInput.oninput = (e) => {
       const kw = e.target.value.toLowerCase().trim();
-      const items = listContainer.querySelectorAll(".zcode-pull-item");
+      const items = listContainer.querySelectorAll(".zcp-pull-item");
       items.forEach((it) => {
         const id = it.getAttribute("data-id").toLowerCase();
         it.style.display = id.includes(kw) ? "flex" : "none";
@@ -952,7 +952,7 @@
       for (const [id, info] of stateMap) {
         info.selected = !info.exists;
       }
-      listContainer.querySelectorAll(".zcode-pull-item").forEach((it) => {
+      listContainer.querySelectorAll(".zcp-pull-item").forEach((it) => {
         const id = it.getAttribute("data-id");
         const cb = it.querySelector("input[type='checkbox']");
         const info = stateMap.get(id);
@@ -1202,8 +1202,8 @@
     pullBtn.setAttribute("title", "根据当前 Base URL 和 API Key 自动拉取所有可用模型");
 
     pullBtn.innerHTML = `
-      <span class="zcode-pull-icon-wrap">
-        <svg class="zcode-pull-bolt-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <span class="zcp-pull-icon-wrap">
+        <svg class="zcp-pull-bolt-icon" viewBox="0 0 24 24" aria-hidden="true">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
         </svg>
       </span>
@@ -1224,7 +1224,7 @@
 
       pullBtn.classList.add("loading");
       pullBtn.innerHTML = `
-        <span class="zcode-pull-icon-wrap">
+        <span class="zcp-pull-icon-wrap">
           <svg class="zcode-spin-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;" aria-hidden="true">
             <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
             <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
@@ -1280,8 +1280,8 @@
       } finally {
         pullBtn.classList.remove("loading");
         pullBtn.innerHTML = `
-          <span class="zcode-pull-icon-wrap">
-            <svg class="zcode-pull-bolt-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <span class="zcp-pull-icon-wrap">
+            <svg class="zcp-pull-bolt-icon" viewBox="0 0 24 24" aria-hidden="true">
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
             </svg>
           </span>

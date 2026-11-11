@@ -13,9 +13,9 @@
   * 尾部连续 = 「现在仍卡在同一个动作上」；中途换了别的动作并已产生输出 → 不算循环（避免误伤）。
 
 独立可单测：
-    python loopguard.py --transcript <transcript.jsonl>      # 打印 JSON 结果
+    python zcp_loopguard.py --transcript <transcript.jsonl>      # 打印 JSON 结果
 
-本模块**只做判定**，不读状态文件、不写盘、不打印到 stderr；由 autocontinue_hook.py 调用，
+本模块**只做判定**，不读状态文件、不写盘、不打印到 stderr；由 zcp_hook.py 调用，
 且只在「自动继续处于开启态」时才会被调用（前置判定由 hook 负责，见契约 §2.3 表格）。
 """
 
@@ -289,7 +289,7 @@ def _emit(obj) -> None:
 def main(argv=None) -> int:
     try:
         parser = argparse.ArgumentParser(
-            prog="loopguard.py",
+            prog="zcp_loopguard.py",
             description="zcode-pilot 循环守卫：检测转录里的重复动作循环（只读、不写盘）",
         )
         parser.add_argument("--transcript", required=True, help="hook 传入的 JSONL 转录路径")

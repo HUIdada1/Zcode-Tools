@@ -23,11 +23,11 @@ from unittest.mock import Mock, patch
 _HERE = Path(__file__).resolve().parent
 for _cand in (_HERE.parent / "scripts",
               _HERE.parent / "skills" / "zcode-pilot" / "scripts"):
-    if (_cand / "apply_after_exit.py").is_file():
+    if (_cand / "zcp_watchdog.py").is_file():
         sys.path.insert(0, str(_cand))
         break
 
-import apply_after_exit as wd  # noqa: E402
+import zcp_watchdog as wd  # noqa: E402
 
 
 class _Result:
@@ -43,7 +43,7 @@ class WatchdogRetryCase(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.pid = self.root / "_watchdog.pid"
         self.want = self.root / "_watchdog.want"
-        self.log = self.root / "_apply_after_exit.log"
+        self.log = self.root / "_zcp_watchdog.log"
         self.want.write_text(json.dumps({"auto_continue": True}), encoding="utf-8")
         self._patches = [
             patch.object(wd, "PID_FILE", self.pid),
@@ -51,7 +51,7 @@ class WatchdogRetryCase(unittest.TestCase):
             patch.object(wd, "LOG", self.log),
             patch.object(wd.time, "sleep", return_value=None),
             patch.object(wd.subprocess, "Popen", return_value=Mock()),
-            patch.object(sys, "argv", ["apply_after_exit.py"]),
+            patch.object(sys, "argv", ["zcp_watchdog.py"]),
         ]
         for p in self._patches:
             p.start()

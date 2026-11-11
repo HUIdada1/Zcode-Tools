@@ -8,7 +8,7 @@
 而是按 cp936 编码 —— 这时 print 一个 GBK 里没有的字符（`✓` `✗` `⚠` `✅` …）
 会直接抛 `UnicodeEncodeError`，**把整段输出打断**。
 
-实测：`doctor.py` 用 subprocess 捕获 `zcode_patcher.py` 的输出时，
+实测：`zcp_doctor.py` 用 subprocess 捕获 `zcp_patcher.py` 的输出时，
 汇总表在 `✓ 用量页去截断补丁` 那一行崩掉，用户看到的是半张表 + traceback，
 还会误以为是补丁本身失败。交互式控制台走 WriteConsoleW，所以这个坑**只在管道里露头**。
 
@@ -80,10 +80,10 @@ CREATE_NO_WINDOW = 0x08000000
 def no_window_kwargs() -> dict:
     """返回「别弹控制台窗口」的 Popen/run 参数；非 Windows 返回空 dict。
 
-    **为什么必须有**：本插件的 SessionStart 钩子用 `--detach` 把 sync.py 拉成
+    **为什么必须有**：本插件的 SessionStart 钩子用 `--detach` 把 zcp_sync.py 拉成
     `DETACHED_PROCESS | CREATE_NO_WINDOW` 的后台 worker —— 也就是**没有控制台**。
     Windows 的语义是：**无控制台的父进程创建 console 子进程时，系统会新建一个控制台并显示出来**。
-    于是 worker 里每一次 `subprocess.run([python, zcode_patcher.py, …])` 都会闪出一个 cmd 窗口；
+    于是 worker 里每一次 `subprocess.run([python, zcp_patcher.py, …])` 都会闪出一个 cmd 窗口；
     而 `run_sync()` 会为每个开关调一次 `check_state()` —— 一个会话能弹 8 个以上。
 
     实测（本机，探针 EnumWindows 统计可见控制台窗口）：无控制台父进程

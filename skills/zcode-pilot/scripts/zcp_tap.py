@@ -16,12 +16,12 @@ ZCode 请求捕获代理（tap proxy）——验证思考等级等参数是否�
      对比不同档位是否有实质差异（同时验证网关的 supported_efforts 降级是否触发）
 
 用法：
-  python tap_proxy.py --listen 127.0.0.1:7864 --target http://127.0.0.1:7863
+  python zcp_tap.py --listen 127.0.0.1:7864 --target http://127.0.0.1:7863
   # 然后在 ZCode 里把（测试用）供应商的 Base URL 指到 http://127.0.0.1:7864/v1
   # 发一轮对话，本工具会把请求体与流内统计打出来
 
-  python tap_proxy.py --target https://api.deepseek.com --capture cap.jsonl
-  python tap_proxy.py --target http://127.0.0.1:8000 --only chat   # 只看对话请求
+  python zcp_tap.py --target https://api.deepseek.com --capture cap.jsonl
+  python zcp_tap.py --target http://127.0.0.1:8000 --only chat   # 只看对话请求
 
 选项：
   --listen HOST:PORT   监听地址（默认 127.0.0.1:7864）
@@ -43,12 +43,12 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-try:                                   # 控制台编码安全网（见 _console.py 的说明）
-    from _console import safe_stdio, warn_mark
+try:                                   # 控制台编码安全网（见 zcp_console.py 的说明）
+    from zcp_console import safe_stdio, warn_mark
 except ImportError:                    # 被别处 import 时脚本目录可能不在 sys.path
     import os
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from _console import safe_stdio, warn_mark
+    from zcp_console import safe_stdio, warn_mark
 
 HOP_BY_HOP = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",

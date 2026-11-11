@@ -33,16 +33,16 @@ check((css.match(/\{/g) || []).length === (css.match(/\}/g) || []).length,
 check(css.includes("backdrop-filter:blur(28px)"), "弹窗缺少 backdrop-filter 毛玻璃");
 check(css.includes("--zpg-accent:#10b981") || css.includes("--zpg-accent:#34d399"),
   "缺少 emerald 视觉令牌");
-check(css.includes(".zcode-pull-icon-wrap"), "按钮缺少内嵌圆形图标包裹层");
-check(css.includes(".zcode-pull-heading-main"), "弹窗标题缺少主/副标题结构");
+check(css.includes(".zcp-pull-icon-wrap"), "按钮缺少内嵌圆形图标包裹层");
+check(css.includes(".zcp-pull-heading-main"), "弹窗标题缺少主/副标题结构");
 check(css.includes("@media (prefers-color-scheme:dark)"), "缺少系统暗色兜底");
 check(!/#2563eb|#3b82f6/.test(css), "毛玻璃覆盖层里仍残留旧蓝色");
 
-check(/class="zcode-pull-icon-wrap"/.test(src), "按钮 innerHTML 没有使用圆形图标包裹层");
-check((src.match(/class="zcode-pull-icon-wrap"/g) || []).length >= 3,
+check(/class="zcp-pull-icon-wrap"/.test(src), "按钮 innerHTML 没有使用圆形图标包裹层");
+check((src.match(/class="zcp-pull-icon-wrap"/g) || []).length >= 3,
   "按钮初始 / loading / finally 三处 innerHTML 都应使用同一图标包裹层");
 check(src.includes("自动拉取模型"), "按钮文案丢失");
-check(src.includes("zcode-pull-heading-main"), "弹窗标题主文案容器丢失");
+check(src.includes("zcp-pull-heading-main"), "弹窗标题主文案容器丢失");
 check(src.includes("选择要同步的模型"), "弹窗标题丢失");
 
 if (bad.length) {

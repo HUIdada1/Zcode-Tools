@@ -316,7 +316,7 @@ async function runTests() {
   check(tree.input.textContent === "会话B现存草稿", "★ 会话 B 的输入框内容绝对未被会话 A 的润色结果篡改！实际=" + tree.input.textContent);
   check(btn().getAttribute("data-mode") === "idle", "★ 会话 B 的按钮依然保持待机状态，未被误设为会话 A 的撤销状态");
 
-  const diag = sandbox.__zenhanceDiag || {};
+  const diag = sandbox.__zcpPolishDiag || {};
   check(!!diag.preventedCrossSessionPollution, "★ 诊断信息中应记录 preventedCrossSessionPollution 阻断事件");
   if (diag.preventedCrossSessionPollution) {
     check(diag.preventedCrossSessionPollution.from === "sess:session-A", "阻断事件来源应为 sess:session-A");

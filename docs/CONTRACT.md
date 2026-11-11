@@ -11,11 +11,11 @@
 | 显示名（marketplace `displayName`） | `ZCode Pilot` |
 | 中文显示名 | `ZCode 工具箱` |
 | 技能目录 | `skills/zcode-pilot/` |
-| 版本 | `0.8.2` |
+| 版本 | `0.9.0` |
 | 仓库名 / 市场名 | 仓库为 `Zcode-Tools`（GitHub：`HUIdada1/Zcode-Tools`），**市场 id 与插件同名 = `zcode-pilot`**：本插件从旧市场里独立出来，配置键为 `zcode-pilot@zcode-pilot` |
 | 图标 | `assets/icon.png` / `assets/banner.png`（由 `tools/make_logo.py` 生成） |
 
-## 1. 补丁清单（zcode_patcher.py 的 `ALL_PATCH_FLAGS`）
+## 1. 补丁清单（zcp_patcher.py 的 `ALL_PATCH_FLAGS`）
 
 改造后为 6 项（**移除 `thought_slider` 与 `model_width`，新增 `auto_continue`**）：
 
@@ -64,9 +64,9 @@ IPC 通道：  "zcode:pilot-state"
 ```json
 {
   "version": 1,
-  "enabled": true,      // 插件配置页托管开关（sync.py 写）
+  "enabled": true,      // 插件配置页托管开关（zcp_sync.py 写）
   "runtime": true,      // 旧版全局开关（兼容读取）；新版本以 sessions[sid].mode 为准
-  "paused": false,      // 全局暂停（sync.py 写；true 时停止一切自动继续）
+  "paused": false,      // 全局暂停（zcp_sync.py 写；true 时停止一切自动继续）
   "cancelToken": 0,     // 递增即作废所有已排队的继续
   "updatedAt": "2026-10-28T16:00:00+08:00",
 
@@ -102,7 +102,7 @@ IPC 通道：  "zcode:pilot-state"
   空文本/坏数字回落默认值。默认策略与 `dsh-client-auto-continue` 一致：
   **默认仅故障恢复（不接力正常完成的回合）**、宽限 3s、冷却 20s、连续上限 3。
 
-* 写入方必须**读-改-写**（不要整体覆盖别人的字段）：`enabled/paused/cancelToken` 归 sync.py，
+* 写入方必须**读-改-写**（不要整体覆盖别人的字段）：`enabled/paused/cancelToken` 归 zcp_sync.py，
   `sessions[sid].mode` 归渲染层（按当前会话切换），`sessions[sid].consecutive/lastAt` 与
   `lastContinueAt` 归 hook，`journal` 归渲染层。
 * 会话模式：`default`（跟随 `settings.defaultMode`）/ `off`（仅本会话关）/ `recover` / `loop`；
@@ -111,7 +111,7 @@ IPC 通道：  "zcode:pilot-state"
 
 * 缺文件 / 字段缺失 → 按上面默认值补齐（`enabled:true` 与插件清单默认值一致）。
 * 渲染层每 **1500ms** 轮询一次（`document.hidden` 时跳过），并在 `visibilitychange` 时立即拉取。
-* 关闭并保存（`enabled:false`）：`sync.py` 写 `enabled:false`、`paused:true`，并把 `cancelToken` +1。
+* 关闭并保存（`enabled:false`）：`zcp_sync.py` 写 `enabled:false`、`paused:true`，并把 `cancelToken` +1。
 * 重新开启并保存（`enabled:true`）：写 `enabled:true`、`paused:false`。
 * 渲染层收到 `cancelToken` 变化 → 清空队列与所有待发定时器；收到 `paused:true` → 停止但不丢队列。
 
@@ -122,18 +122,18 @@ IPC 通道：  "zcode:pilot-state"
 
 | 文件（均在 `~/.zcode/pilot/`） | 写入方 | 语义 |
 | --- | --- | --- |
-| `watchdog.pid` / `watchdog.want` | `sync.py` / `apply_after_exit.py` | 看护单例与待办；**必须共享**，否则新旧版本的看护会同时存在并互相覆盖 |
-| `watchdog.watch` | `sync.py`（`start_watchdog`） | 常驻监听开关；存在时看护即使没有待办也等到客户端退出 |
-| `injected.json` | `sync.py`（`write_inject_record`） | `{pluginVersion, pluginRoot}`：`app.asar` 当前注入的是哪个插件版本 |
-| `reinject.pending` | `sync.py`（`mark_reinject_pending`） | 重打包级补丁尚未落盘（被客户端提前启动打断）；下次会话据此提示「再完全退出一次、等看护自动拉起、别手动打开」 |
+| `watchdog.pid` / `watchdog.want` | `zcp_sync.py` / `zcp_watchdog.py` | 看护单例与待办；**必须共享**，否则新旧版本的看护会同时存在并互相覆盖 |
+| `watchdog.watch` | `zcp_sync.py`（`start_watchdog`） | 常驻监听开关；存在时看护即使没有待办也等到客户端退出 |
+| `injected.json` | `zcp_sync.py`（`write_inject_record`） | `{pluginVersion, pluginRoot}`：`app.asar` 当前注入的是哪个插件版本 |
+| `reinject.pending` | `zcp_sync.py`（`mark_reinject_pending`） | 重打包级补丁尚未落盘（被客户端提前启动打断）；下次会话据此提示「再完全退出一次、等看护自动拉起、别手动打开」 |
 
 * **只在市场安装目录里记账**：`pluginRoot` 必须等于 `installed_plugins.json` 里本插件的
   `installPath`。从仓库/绿色目录手工跑 sync 不会污染记录（否则开发目录会被误判成升级）。
 * 看护在客户端退出的一瞬间比对「`injected.json` 的版本」与「市场登记表里的当前版本」；
-  不一致 → 改用**新版插件目录**的 `sync.py --apply-now` 重注入（绝不用旧目录的 patcher
+  不一致 → 改用**新版插件目录**的 `zcp_sync.py --apply-now` 重注入（绝不用旧目录的 patcher
   把旧实现写回去），成功后自动重启客户端。
-* 成功判据是 `injected.json` 的版本已变成新版（`sync.py` 总返回 0，退出码不可信）。
-* `sync.py --apply-now`：客户端已退出场景使用，重打包级补丁当场写入且不拉起新看护。
+* 成功判据是 `injected.json` 的版本已变成新版（`zcp_sync.py` 总返回 0，退出码不可信）。
+* `zcp_sync.py --apply-now`：客户端已退出场景使用，重打包级补丁当场写入且不拉起新看护。
 * **退出确认**：看护判定「已退出」后再等 `EXIT_CONFIRM_SEC`（2s）复查一次，
   防止把「更新器正在重启」误判成退出——那会让写入被预检拒绝并白白消耗一轮。
 * 写入被拒绝/未获得窗口时 **绝不删待办**：`watchdog.want` 与 `reinject.pending` 都保留，
@@ -150,19 +150,19 @@ IPC 通道：  "zcode:pilot-state"
 
 | 层 | 文件 | 职责 |
 | --- | --- | --- |
-| 续跑决策（权威） | `skills/zcode-pilot/scripts/autocontinue_hook.py` | `Stop` / `UserPromptSubmit` hook：判定是否需要续跑、选文本、计时与计数、循环守卫 |
-| 循环守卫（独立模块） | `skills/zcode-pilot/scripts/loopguard.py` | 独立识别重复动作循环，输出循环提示文；由 hook 调用，**关闭自动继续时同步失效** |
+| 续跑决策（权威） | `skills/zcode-pilot/scripts/zcp_hook.py` | `Stop` / `UserPromptSubmit` hook：判定是否需要续跑、选文本、计时与计数、循环守卫 |
+| 循环守卫（独立模块） | `skills/zcode-pilot/scripts/zcp_loopguard.py` | 独立识别重复动作循环，输出循环提示文；由 hook 调用，**关闭自动继续时同步失效** |
 | 控制面/观测面 | `skills/zcode-pilot/scripts/zcode-pilot.js` | 开关 UI（状态只显示在开关自身）、状态文件读写、**崩溃恢复**的续跑发送 |
-| 补丁链路 | `zcode_patcher.py` 的 `PILOT_SPEC` | 只负责把 `zcode-pilot.js` 与 preload/main 桥注入 asar |
+| 补丁链路 | `zcp_patcher.py` 的 `PILOT_SPEC` | 只负责把 `zcode-pilot.js` 与 preload/main 桥注入 asar |
 
 ### 2.3.1 hook 注册（`hooks/hooks.json`）
 
 ```json
 "Stop":             [{ "hooks": [{ "type": "command",
-   "command": "python \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/autocontinue_hook.py\" --event stop || python3 ...",
+   "command": "python \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_hook.py\" --event stop || python3 ...",
    "shell": true, "timeoutMs": 30000 }] }],
 "UserPromptSubmit": [{ "hooks": [{ "type": "command",
-   "command": "python \".../autocontinue_hook.py\" --event user-prompt || python3 ...",
+   "command": "python \".../zcp_hook.py\" --event user-prompt || python3 ...",
    "shell": true, "timeoutMs": 15000 }] }]
 ```
 
@@ -244,7 +244,7 @@ IPC 通道：  "zcode:pilot-state"
 
 * 事件流 `row.kind === "turnHeader" && row.state === "failed"` 触发；同一 `turnId`
   只处理一次（防同轮多次 upsert 连发）；`completedInterrupted` = 用户主动停止，**不接力**。
-* 触发前按序校验（任一不满足即放弃，并在 `__zpilotDiag.failedTurn.reason` 留痕）：
+* 触发前按序校验（任一不满足即放弃，并在 `__zcpCoreDiag.failedTurn.reason` 留痕）：
   `stateReady`/桥存在 → 有 session → `sid === 当前 DOM 会话` → 会话未关/未暂停 →
   `settings.resumeFailedTurns !== false` → 当前不在流式 → `origin === "userInput"` →
   `executionKind` 为 `agent`（或缺失）→ 连续次数未达 `maxConsecutive` → 冷却已过。
@@ -312,8 +312,8 @@ IPC 通道：  "zcode:pilot-state"
 | lead | `docs/CONTRACT.md`、`tools/*`、`assets/*`、`README.md`、`NOTICE.md`、`marketplace.json`、`.zcode-plugin/plugin.json` |
 | js-tps | `skills/zcode-pilot/scripts/zcode-tps.js` |
 | js-pilot | `skills/zcode-pilot/scripts/zcode-pilot.js`（新建） |
-| py-core | `skills/zcode-pilot/scripts/zcode_patcher.py`、`sync.py`、`apply_after_exit.py`、`doctor.py`、`restore_clean.py`、`hooks/hooks.json`、删除 `zcode-thought-slider.js` |
-| docs-skill | `skills/zcode-pilot/SKILL.md`、`commands/*.md`、`bootstrap.py`、`autopilot.py`、`.github/workflows/ci.yml` |
+| py-core | `skills/zcode-pilot/scripts/zcp_patcher.py`、`zcp_sync.py`、`zcp_watchdog.py`、`zcp_doctor.py`、`zcp_restore.py`、`hooks/hooks.json`、删除 `zcode-thought-slider.js` |
+| docs-skill | `skills/zcode-pilot/SKILL.md`、`commands/*.md`、`zcp_bootstrap.py`、`zcp_pipeline.py`、`.github/workflows/ci.yml` |
 | tests | `tests/*` |
 
 `tests/` 与 `docs/` 的更新必须在 py-core 与 js-pilot 落地之后进行（依赖最终形态）。

@@ -37,7 +37,7 @@
   ⑨ ★ explicit 档（右键菜单本次指定）压过 ⓪config 与 ①ref
   ⑩ ★ `{list:true}` 清单模式：只回候选表、**一个请求都不发**
   ⑪ ★ `zcode:enhance-model-save`：持久化选择，且保留其它热配置参数
-  ⑫ ★ `enhance_doctor.py` 的档位顺序必须与 handler 同构（复刻不能漂移）
+  ⑫ ★ `zcp_polish_zcp_doctor.py` 的档位顺序必须与 handler 同构（复刻不能漂移）
 """
 
 import importlib.util
@@ -56,10 +56,10 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 for _cand in (_HERE.parent / "scripts",
               _HERE.parent / "skills" / "zcode-pilot" / "scripts"):
-    if (_cand / "zcode_patcher.py").is_file():
+    if (_cand / "zcp_patcher.py").is_file():
         sys.path.insert(0, str(_cand))
         break
-import zcode_patcher as zp          # noqa: E402
+import zcp_patcher as zp          # noqa: E402
 
 
 # --------------------------------------------------------------- 假 HTTP 服务器
@@ -845,10 +845,10 @@ class TestEnhanceScriptDockAnchoring(unittest.TestCase):
 
 
 class TestDoctorMirrorsHandler(unittest.TestCase):
-    """`enhance_doctor.py` 必须与 handler 的档位顺序保持一致。
+    """`zcp_polish_zcp_doctor.py` 必须与 handler 的档位顺序保持一致。
 
     它是用户排障时**唯一能看到的真相**（GUI 里没有任何档位信息）。一旦两者漂移，
-    doctor 说「会用 A」而按钮实际用 B —— 排障过程本身变成误导，比没有工具更糟。
+    zcp_doctor 说「会用 A」而按钮实际用 B —— 排障过程本身变成误导，比没有工具更糟。
     这也是这个仓库反复踩过的坑（见 MEMORY：别把输出字符串/复刻逻辑当接口）。
     """
 
@@ -857,12 +857,12 @@ class TestDoctorMirrorsHandler(unittest.TestCase):
         path = None
         for cand in (_HERE.parent / "scripts",
                      _HERE.parent / "skills" / "zcode-pilot" / "scripts"):
-            p = cand / "enhance_doctor.py"
+            p = cand / "zcp_polish_zcp_doctor.py"
             if p.is_file():
                 path = p
                 break
         if path is None:
-            raise unittest.SkipTest("未找到 enhance_doctor.py")
+            raise unittest.SkipTest("未找到 zcp_polish_zcp_doctor.py")
         spec = importlib.util.spec_from_file_location("zenh_doctor", path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -904,7 +904,7 @@ class TestDoctorMirrorsHandler(unittest.TestCase):
         self.assertEqual(pick["mid"], "m1")
 
     def test_unusable_explicit_is_skipped(self):
-        """override 指向无 key 的供应商 → doctor 也必须跳过（与 handler 同口径）。"""
+        """override 指向无 key 的供应商 → zcp_doctor 也必须跳过（与 handler 同口径）。"""
         cands = self._cands()
         cands.append({"pid": "dead", "name": "D", "kind": "openai-compatible",
                       "baseURL": "http://z/v1", "apiKey": "", "models": ["m9"],
@@ -931,7 +931,7 @@ class TestDoctorMirrorsHandler(unittest.TestCase):
         self.assertEqual((pick["pid"], pick["mid"]), ("p2", "m3"))
 
     def test_tier_order_matches_handler_source(self):
-        """doctor 的行为顺序必须与 handler 源码顺序同构。"""
+        """zcp_doctor 的行为顺序必须与 handler 源码顺序同构。"""
         src = zp._ENHANCE_HANDLER
         i_exp = src.index("if(!pick&&t&&t.override")
         i_cfg = src.index('if(!pick&&cfg&&String(cfg.providerId')
@@ -941,13 +941,13 @@ class TestDoctorMirrorsHandler(unittest.TestCase):
 
         cands = self._cands()
         by_id = {c["pid"]: c for c in cands}
-        # doctor 在「三档都有候选」时必须选 explicit —— 与源码顺序同构
+        # zcp_doctor 在「三档都有候选」时必须选 explicit —— 与源码顺序同构
         _, how, _ = self.doc.resolve(
             cands, by_id, "p1/m1", "m1",
             override={"providerId": "p2", "modelId": "m3"},
             cfg={"providerId": "p1", "modelId": "m2"})
         self.assertEqual(how, "explicit",
-                         "doctor 的档位优先级与 handler 源码顺序不一致（复刻已漂移）")
+                         "zcp_doctor 的档位优先级与 handler 源码顺序不一致（复刻已漂移）")
 
 
 if __name__ == "__main__":

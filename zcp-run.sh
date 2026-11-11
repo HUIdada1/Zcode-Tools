@@ -1,11 +1,11 @@
 #!/bin/sh
 # zcode-toolkit 一键入口（macOS / Linux / Git Bash）
 #
-# 作用：找到可用的 Python，把参数原样转交给 autopilot.py。
+# 作用：找到可用的 Python，把参数原样转交给 zcp_pipeline.py。
 # 用法：
-#   ./run.sh                  # 全自动跑通
-#   ./run.sh --no-deploy      # 只构建 + 测试
-#   ./run.sh --unattended     # 无人值守（CI）
+#   ./zcp-run.sh                  # 全自动跑通
+#   ./zcp-run.sh --no-deploy      # 只构建 + 测试
+#   ./zcp-run.sh --unattended     # 无人值守（CI）
 #
 # 为什么需要这层壳：三平台对「python 还是 python3」的约定不同，
 # 且从文件管理器双击运行时工作目录未必是仓库根。这里两者都处理掉。
@@ -31,7 +31,7 @@ if command -v cygpath >/dev/null 2>&1; then
     [ -n "$WINPATH" ] && SCRIPT_DIR=$WINPATH
 fi
 
-# 依次尝试常见的 Python 命令名；能跑起来的第一个就用（版本检查交给 autopilot.py）
+# 依次尝试常见的 Python 命令名；能跑起来的第一个就用（版本检查交给 zcp_pipeline.py）
 PY=""
 for cand in python3 python py; do
     if command -v "$cand" >/dev/null 2>&1; then
@@ -50,12 +50,12 @@ if [ -z "$PY" ]; then
     exit 2
 fi
 
-# 输出统一按 UTF-8 编码（与 run.cmd 同一约定）。
+# 输出统一按 UTF-8 编码（与 zcp-run.cmd 同一约定）。
 # Windows 中文版的控制台代码页是 cp936：一旦被重定向/走管道（`> log.txt`、
 # CI 抓 stdout、测试的 capture_output=True），Python 就改用该代码页，中文整段变问号，
 # 管道另一侧按 UTF-8 解码的人看到的是乱码。交互式控制台走 WriteConsoleW，不受影响。
 : "${PYTHONIOENCODING:=utf-8}"
 export PYTHONIOENCODING
 
-exec "$PY" "$SCRIPT_DIR/autopilot.py" "$@"
+exec "$PY" "$SCRIPT_DIR/zcp_pipeline.py" "$@"
 

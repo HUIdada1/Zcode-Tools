@@ -29,19 +29,19 @@ from unittest.mock import patch
 _HERE = Path(__file__).resolve().parent
 for _cand in (_HERE.parent / "scripts",
               _HERE.parent / "skills" / "zcode-pilot" / "scripts"):
-    if (_cand / "autocontinue_hook.py").is_file():
+    if (_cand / "zcp_hook.py").is_file():
         sys.path.insert(0, str(_cand))
         _SCRIPTS = _cand
         break
 else:  # pragma: no cover
     _SCRIPTS = _HERE.parent / "skills" / "zcode-pilot" / "scripts"
 
-import autocontinue_hook as hook   # noqa: E402
-import loopguard                   # noqa: E402
-import sync                        # noqa: E402
+import zcp_hook as hook   # noqa: E402
+import zcp_loopguard                   # noqa: E402
+import zcp_sync                        # noqa: E402
 
 PILOT_JS = _SCRIPTS / "zcode-pilot.js"
-HOOK_PY = _SCRIPTS / "autocontinue_hook.py"
+HOOK_PY = _SCRIPTS / "zcp_hook.py"
 REPO_ROOT = _HERE.parent
 
 
@@ -310,7 +310,7 @@ class TestFailedTurnFallback(unittest.TestCase):
         self.assertNotIn('state === "completedInterrupted") handleFailedTurn', src)
 
     def test_main_handler_whitelists_resume_failed_turns(self):
-        patcher = (_SCRIPTS / "zcode_patcher.py").read_text(encoding="utf-8")
+        patcher = (_SCRIPTS / "zcp_patcher.py").read_text(encoding="utf-8")
         self.assertIn("resumeFailedTurns:!0", patcher)
         self.assertIn('"resumeFailedTurns","guardTools"', patcher)
 
@@ -411,14 +411,14 @@ class TestStateFileReadWrite(StateFileCase):
 
 
 class TestSyncWritesPilotState(unittest.TestCase):
-    """§2.2 写者分工：sync.py 只碰 enabled/paused/cancelToken，关闭即作废队列。"""
+    """§2.2 写者分工：zcp_sync.py 只碰 enabled/paused/cancelToken，关闭即作废队列。"""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.dir = Path(self._tmp.name) / "pilot"
         self.file = self.dir / "state.json"
-        self.patcher = patch.multiple(sync, PILOT_DIR=self.dir, PILOT_STATE=self.file)
+        self.patcher = patch.multiple(zcp_sync, PILOT_DIR=self.dir, PILOT_STATE=self.file)
         self.patcher.start()
         self.addCleanup(self.patcher.stop)
 
@@ -432,12 +432,12 @@ class TestSyncWritesPilotState(unittest.TestCase):
     def test_enable_on_fresh_state_writes_nothing(self):
         """幂等：状态文件缺失 == 契约默认值 == 已开启，不该凭空造一个文件。
         （hook 与渲染层都把「缺文件」读成 enabled=true，写盘纯属多余。）"""
-        self.assertEqual(sync.write_pilot_state(True), "")
+        self.assertEqual(zcp_sync.write_pilot_state(True), "")
         self.assertFalse(self.file.exists())
 
     def test_enable_creates_file_only_when_state_differs(self):
         self.seed({"enabled": False, "paused": True, "cancelToken": 1})
-        sync.write_pilot_state(True)
+        zcp_sync.write_pilot_state(True)
         st = self.load()
         self.assertEqual((st["enabled"], st["paused"], st["cancelToken"]), (True, False, 1))
 
@@ -446,14 +446,14 @@ class TestSyncWritesPilotState(unittest.TestCase):
                    "cancelToken": 3, "lastContinueAt": 111,
                    "sessions": {"s1": {"consecutive": 2, "lastAt": 9}},
                    "journal": {"s1": {"turnId": "t9", "text": "继续"}}})
-        sync.write_pilot_state(False)
+        zcp_sync.write_pilot_state(False)
         st = self.load()
         self.assertEqual((st["enabled"], st["paused"]), (False, True))
         self.assertEqual(st["cancelToken"], 4, "关闭保存必须递增令牌以作废排队继续")
 
     def test_reenable_clears_pause_without_bumping_token(self):
         self.seed({"enabled": False, "paused": True, "cancelToken": 7, "runtime": True})
-        sync.write_pilot_state(True)
+        zcp_sync.write_pilot_state(True)
         st = self.load()
         self.assertEqual((st["enabled"], st["paused"], st["cancelToken"]), (True, False, 7))
 
@@ -461,7 +461,7 @@ class TestSyncWritesPilotState(unittest.TestCase):
         """已关闭时再关一次绝不能再 +1——否则每次开会话都白作废一次队列。"""
         self.seed({"enabled": False, "paused": True, "cancelToken": 5})
         before = self.file.read_text(encoding="utf-8")
-        self.assertEqual(sync.write_pilot_state(False), "")
+        self.assertEqual(zcp_sync.write_pilot_state(False), "")
         self.assertEqual(self.load()["cancelToken"], 5)
         self.assertEqual(self.file.read_text(encoding="utf-8"), before, "无需改动却写了盘")
 
@@ -469,7 +469,7 @@ class TestSyncWritesPilotState(unittest.TestCase):
         self.seed({"enabled": True, "paused": False, "cancelToken": 0, "runtime": False,
                    "lastContinueAt": 999, "sessions": {"a": {"consecutive": 4}},
                    "journal": {"a": {"turnId": "x"}}, "unknownFutureField": {"k": 1}})
-        sync.write_pilot_state(False)
+        zcp_sync.write_pilot_state(False)
         st = self.load()
         self.assertEqual(st["runtime"], False, "覆盖了渲染层的 runtime")
         self.assertEqual(st["lastContinueAt"], 999, "覆盖了 hook 的冷却时间戳")
@@ -481,13 +481,13 @@ class TestSyncWritesPilotState(unittest.TestCase):
         """坏 JSON 不能把开关同步整个带崩：按默认值补齐后照常写出合法状态。"""
         self.dir.mkdir(parents=True, exist_ok=True)
         self.file.write_text("{坏 JSON", encoding="utf-8")
-        sync.write_pilot_state(False)
+        zcp_sync.write_pilot_state(False)
         st = self.load()
         self.assertEqual((st["enabled"], st["paused"], st["cancelToken"]), (False, True, 1))
 
     def test_non_int_token_is_normalized(self):
         self.seed({"enabled": True, "paused": False, "cancelToken": "abc"})
-        sync.write_pilot_state(False)
+        zcp_sync.write_pilot_state(False)
         self.assertEqual(self.load()["cancelToken"], 1)
 
     def test_write_failure_returns_note_and_never_raises(self):
@@ -495,14 +495,14 @@ class TestSyncWritesPilotState(unittest.TestCase):
         blocker = Path(self._tmp.name) / "blocker"
         blocker.write_text("x", encoding="utf-8")
         self.seed({"enabled": True, "paused": False, "cancelToken": 0})
-        with patch.object(sync, "PILOT_DIR", Path(self._tmp.name) / "pilot"), \
-             patch.object(sync, "PILOT_STATE", blocker / "sub" / "state.json"):
-            note = sync.write_pilot_state(False)     # 关闭 → 必须写盘 → 落点不可用
+        with patch.object(zcp_sync, "PILOT_DIR", Path(self._tmp.name) / "pilot"), \
+             patch.object(zcp_sync, "PILOT_STATE", blocker / "sub" / "state.json"):
+            note = zcp_sync.write_pilot_state(False)     # 关闭 → 必须写盘 → 落点不可用
         self.assertIn("状态文件写入失败", note)
 
     def test_sync_writes_state_before_any_repack(self):
         """关闭要**立刻**生效（不等客户端退出）：run_sync 必须在动 app.asar 之前写状态文件。"""
-        src = (_SCRIPTS / "sync.py").read_text(encoding="utf-8")
+        src = (_SCRIPTS / "zcp_sync.py").read_text(encoding="utf-8")
         self.assertLess(src.index("write_pilot_state(bool(wanted[\"auto_continue\"]))"),
                         src.index("for key, args, repack in PATCHES:"),
                         "状态文件晚于补丁循环 → 关闭后已排队的继续不会被及时作废")
@@ -534,14 +534,14 @@ class TestGate(StateFileCase):
     def test_missing_fields_default_to_enabled(self):
         self.assertEqual(hook.gate({}), "")
 
-    def test_loopguard_not_called_when_switch_off(self):
+    def test_zcp_loopguard_not_called_when_switch_off(self):
         """契约 §2.3：关闭自动继续时循环守卫必须同步失效（不许白读转录）。"""
         payload = {"session_id": "s", "transcript_path": "whatever.jsonl"}
         state = hook.default_state()
         state["enabled"] = False
-        with patch.object(hook.loopguard, "detect",
+        with patch.object(hook.zcp_loopguard, "detect",
                           side_effect=AssertionError("不该被调用")) as det, \
-             patch.object(hook.loopguard, "load_transcript",
+             patch.object(hook.zcp_loopguard, "load_transcript",
                           side_effect=AssertionError("不该被调用")):
             slp, emitted = self.run_stop(payload, state)
         self.assertEqual(det.call_count, 0)
@@ -956,7 +956,7 @@ class TestCliSafety(unittest.TestCase):
         self.assertEqual(r.stderr.strip(), "", "stderr 有内容会被内核当成续跑文本")
 
 
-# ================================================================== 循环守卫 loopguard
+# ================================================================== 循环守卫 zcp_loopguard
 
 class TestLoopguardNormalization(unittest.TestCase):
 
@@ -966,37 +966,37 @@ class TestLoopguardNormalization(unittest.TestCase):
                       {"sessionId": "s1"}, {"trace_id": "t1"}, {"id": "9"}):
             variant = {"name": "Read",
                        "input": {**base["input"], **noise}}
-            self.assertEqual(loopguard.fingerprint(base),
-                             loopguard.fingerprint(variant), str(noise))
+            self.assertEqual(zcp_loopguard.fingerprint(base),
+                             zcp_loopguard.fingerprint(variant), str(noise))
 
     def test_noise_inside_strings_is_normalized(self):
         a = {"name": "Bash", "input": {"cmd": "cat /tmp/abcdef01-2345-6789-abcd-ef0123456789/x"}}
         b = {"name": "Bash", "input": {"cmd": "cat /tmp/99999999-1111-2222-3333-444444444444/x"}}
-        self.assertEqual(loopguard.fingerprint(a), loopguard.fingerprint(b))
+        self.assertEqual(zcp_loopguard.fingerprint(a), zcp_loopguard.fingerprint(b))
 
     def test_timestamps_in_strings(self):
         a = {"name": "Bash", "input": {"c": "started 2026-10-29T08:00:00.123Z"}}
         b = {"name": "Bash", "input": {"c": "started 2026-10-28T01:02:03.456+08:00"}}
-        self.assertEqual(loopguard.fingerprint(a), loopguard.fingerprint(b))
+        self.assertEqual(zcp_loopguard.fingerprint(a), zcp_loopguard.fingerprint(b))
 
     def test_real_argument_difference_is_detected(self):
         a = {"name": "Read", "input": {"file_path": "a.ts"}}
         b = {"name": "Read", "input": {"file_path": "b.ts"}}
-        self.assertNotEqual(loopguard.fingerprint(a), loopguard.fingerprint(b))
+        self.assertNotEqual(zcp_loopguard.fingerprint(a), zcp_loopguard.fingerprint(b))
 
     def test_tool_name_case_is_ignored(self):
-        self.assertEqual(loopguard.fingerprint({"name": "Read", "input": {}}),
-                         loopguard.fingerprint({"name": "read", "input": {}}))
+        self.assertEqual(zcp_loopguard.fingerprint({"name": "Read", "input": {}}),
+                         zcp_loopguard.fingerprint({"name": "read", "input": {}}))
 
     def test_result_digest_none_is_own_class(self):
-        self.assertEqual(loopguard.result_digest(None), "<none>")
-        self.assertNotEqual(loopguard.result_digest(None),
-                            loopguard.result_digest({"text": ""}))
+        self.assertEqual(zcp_loopguard.result_digest(None), "<none>")
+        self.assertNotEqual(zcp_loopguard.result_digest(None),
+                            zcp_loopguard.result_digest({"text": ""}))
 
     def test_error_flag_separates_digests(self):
         same = "boom"
-        self.assertNotEqual(loopguard.result_digest({"text": same, "is_error": False}),
-                            loopguard.result_digest({"text": same, "is_error": True}))
+        self.assertNotEqual(zcp_loopguard.result_digest({"text": same, "is_error": False}),
+                            zcp_loopguard.result_digest({"text": same, "is_error": True}))
 
 
 class TestLoopguardTranscript(unittest.TestCase):
@@ -1007,22 +1007,22 @@ class TestLoopguardTranscript(unittest.TestCase):
         self.dir = Path(self._tmp.name)
 
     def parse(self, rows):
-        return loopguard.load_transcript(str(write_jsonl(self.dir / "t.jsonl", rows)))
+        return zcp_loopguard.load_transcript(str(write_jsonl(self.dir / "t.jsonl", rows)))
 
     def test_missing_path_is_empty_shape(self):
-        data = loopguard.load_transcript("")
+        data = zcp_loopguard.load_transcript("")
         self.assertEqual(set(data) >= {"calls", "results", "last_assistant_text",
                                        "usage", "finish_reason", "status"}, True)
         self.assertEqual(data["calls"], [])
 
     def test_nonexistent_file_is_silent(self):
-        self.assertEqual(loopguard.load_transcript(str(self.dir / "nope.jsonl"))["calls"], [])
+        self.assertEqual(zcp_loopguard.load_transcript(str(self.dir / "nope.jsonl"))["calls"], [])
 
     def test_bad_lines_are_skipped_good_kept(self):
         p = self.dir / "mixed.jsonl"
         p.write_text("{坏行\n" + json.dumps({"message": {"content": [tool_use(1)]}})
                      + "\n\n", encoding="utf-8")
-        self.assertEqual(len(loopguard.load_transcript(str(p))["calls"]), 1)
+        self.assertEqual(len(zcp_loopguard.load_transcript(str(p))["calls"]), 1)
 
     def test_nested_and_flat_tool_use_both_collected(self):
         data = self.parse([
@@ -1089,22 +1089,22 @@ class TestLoopguardDetect(unittest.TestCase):
         return self.dir / name
 
     def test_constants(self):
-        self.assertEqual(loopguard.WINDOW, 12)
-        self.assertEqual(loopguard.REPEAT_MIN, 3)
+        self.assertEqual(zcp_loopguard.WINDOW, 12)
+        self.assertEqual(zcp_loopguard.REPEAT_MIN, 3)
 
     def test_hits_at_threshold(self):
         p = loop_transcript(self.path("d1.jsonl"), 3)
-        hit = loopguard.detect(str(p))
+        hit = zcp_loopguard.detect(str(p))
         self.assertEqual(hit["looped"], True)
         self.assertEqual(hit["repeat"], 3)
         self.assertEqual(hit["tool"], "read_file")
 
     def test_below_threshold(self):
-        self.assertIsNone(loopguard.detect(str(loop_transcript(self.path("d2.jsonl"), 2))))
+        self.assertIsNone(zcp_loopguard.detect(str(loop_transcript(self.path("d2.jsonl"), 2))))
 
     def test_counts_all_tail_repeats(self):
         p = loop_transcript(self.path("d3.jsonl"), 6)
-        self.assertEqual(loopguard.detect(str(p))["repeat"], 6)
+        self.assertEqual(zcp_loopguard.detect(str(p))["repeat"], 6)
 
     def test_only_tail_consecutive_runs_count(self):
         """中途换了别的动作并已产生输出 → 现在没卡住，不算循环（避免误伤）。"""
@@ -1112,31 +1112,31 @@ class TestLoopguardDetect(unittest.TestCase):
         rows.insert(0, tool_use(99, name="other_tool", path="z.txt"))
         p = write_jsonl(self.path("d4.jsonl"),
                         [{"message": {"content": [r]}} for r in rows])
-        hit = loopguard.detect(str(p))
+        hit = zcp_loopguard.detect(str(p))
         self.assertTrue(hit and hit["repeat"] == 3)
         # 尾部被别的动作打断
         rows = [tool_use(i, path="same.txt") for i in range(3)]
         rows.append(tool_use(50, name="other", path="q"))
         p = write_jsonl(self.path("d5.jsonl"),
                         [{"message": {"content": [r]}} for r in rows])
-        self.assertIsNone(loopguard.detect(str(p)))
+        self.assertIsNone(zcp_loopguard.detect(str(p)))
 
     def test_differing_results_break_the_loop(self):
         """同指纹但每次输出不同 → 有差异信号，不是死循环。"""
         p = loop_transcript(self.path("d6.jsonl"), 4,
                             results=["结果一", "结果二", "结果三", "结果四"])
-        self.assertIsNone(loopguard.detect(str(p)))
+        self.assertIsNone(zcp_loopguard.detect(str(p)))
 
     def test_identical_results_still_a_loop(self):
         p = loop_transcript(self.path("d7.jsonl"), 3, results=["同样报错", ] * 3)
-        self.assertTrue(loopguard.detect(str(p))["looped"])
+        self.assertTrue(zcp_loopguard.detect(str(p))["looped"])
 
     def test_timestamp_only_result_difference_is_noise(self):
         p = loop_transcript(
             self.path("d8.jsonl"), 3,
             results=["耗时 2026-10-29T08:00:00Z", "耗时 2026-10-29T08:00:01Z",
                      "耗时 2026-10-29T08:00:02Z"])
-        self.assertTrue(loopguard.detect(str(p))["looped"],
+        self.assertTrue(zcp_loopguard.detect(str(p))["looped"],
                         "结果只差时间戳应视为无差异（仍在原地打转）")
 
     def test_window_caps_lookback(self):
@@ -1144,16 +1144,16 @@ class TestLoopguardDetect(unittest.TestCase):
         rows = [tool_use(i, path="same.txt") for i in range(3)]
         rows += [tool_use(100 + i, name="other", path="p%d" % i) for i in range(10)]
         p = write_jsonl(self.path("d9.jsonl"), [{"message": {"content": [r]}} for r in rows])
-        self.assertIsNone(loopguard.detect(str(p)))
+        self.assertIsNone(zcp_loopguard.detect(str(p)))
 
     def test_missing_or_empty_path(self):
-        self.assertIsNone(loopguard.detect(""))
-        self.assertIsNone(loopguard.detect(None))
-        self.assertIsNone(loopguard.detect("no-such-file.jsonl"))
+        self.assertIsNone(zcp_loopguard.detect(""))
+        self.assertIsNone(zcp_loopguard.detect(None))
+        self.assertIsNone(zcp_loopguard.detect("no-such-file.jsonl"))
 
     def test_cli_prints_looped_and_exits_zero(self):
         p = loop_transcript(self.path("cli.jsonl"), 3)
-        r = subprocess.run([sys.executable, str(_SCRIPTS / "loopguard.py"),
+        r = subprocess.run([sys.executable, str(_SCRIPTS / "zcp_loopguard.py"),
                             "--transcript", str(p)],
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=60)
@@ -1161,7 +1161,7 @@ class TestLoopguardDetect(unittest.TestCase):
         self.assertEqual(json.loads(r.stdout)["looped"], True)
 
     def test_cli_defaults_to_not_looped(self):
-        r = subprocess.run([sys.executable, str(_SCRIPTS / "loopguard.py"),
+        r = subprocess.run([sys.executable, str(_SCRIPTS / "zcp_loopguard.py"),
                             "--transcript", "no-such-file.jsonl"],
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=60)
@@ -1184,7 +1184,7 @@ class TestHookRegistration(unittest.TestCase):
             self.assertIn(event, self.hooks)
             cmds = [h["command"] for group in self.hooks[event] for h in group["hooks"]]
             joined = " ".join(cmds)
-            self.assertIn("autocontinue_hook.py", joined, event)
+            self.assertIn("zcp_hook.py", joined, event)
             self.assertIn(flag, joined, event)
             self.assertIn("skills/zcode-pilot/scripts/", joined, event)
 
@@ -1199,7 +1199,7 @@ class TestHookRegistration(unittest.TestCase):
         """保持原有能力：SessionStart 仍要拉一次配置同步。"""
         joined = " ".join(h["command"] for group in self.hooks["SessionStart"]
                           for h in group["hooks"])
-        self.assertIn("sync.py", joined)
+        self.assertIn("zcp_sync.py", joined)
 
 
 class TestManifestSwitch(unittest.TestCase):
@@ -1219,7 +1219,7 @@ class TestManifestSwitch(unittest.TestCase):
         self.assertFalse((_SCRIPTS / "zcode-thought-slider.js").exists())
 
     def test_patcher_exposes_auto_continue_flag(self):
-        import zcode_patcher as zp
+        import zcp_patcher as zp
         self.assertIn("auto_continue", zp.ALL_PATCH_FLAGS)
         self.assertNotIn("thought_slider", zp.ALL_PATCH_FLAGS)
 
@@ -1267,7 +1267,7 @@ class TestRendererMountPoints(unittest.TestCase):
         self.assertIn("data-ztps-bar", self.src)
 
     def test_crash_recovery_send_path(self):
-        for token in ("v4-composer-send", "writeText", "__zpilotDiag"):
+        for token in ("v4-composer-send", "writeText", "__zcpCoreDiag"):
             self.assertIn(token, self.src)
 
     def test_reduced_motion_and_theme_colors(self):

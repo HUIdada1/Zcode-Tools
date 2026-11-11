@@ -1,7 +1,7 @@
 # 统一换行符：脚本/文档一律 LF（避免 Windows 检出后 CRLF 破坏 shebang 与跨平台执行）
 * text=auto eol=lf
 # 例外：Windows 批处理按 CRLF 检出。
-# 实测本仓库的 run.cmd 即便全 LF 也能跑（现代 cmd 容忍 LF），所以这条是**防御性**约定，
+# 实测本仓库的 zcp-run.cmd 即便全 LF 也能跑（现代 cmd 容忍 LF），所以这条是**防御性**约定，
 # 不是已知故障的修复：.cmd 里的标签 / goto / 多行块在纯 LF 下历来有解析风险，
 # 而 CRLF 对批处理永远是正确形态，代价为零。
 *.cmd text eol=crlf

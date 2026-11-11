@@ -362,7 +362,7 @@ function boot(doc, bridgeState, opts) {
       "message=", (sandbox.__listeners.message || []).length,
       "windowIsSandbox=", sandbox.window === sandbox,
       "vmWindowIsSandbox=", vmWindow === sandbox,
-      "portHooked=", sandbox.__zpilotDiag && sandbox.__zpilotDiag.portHooked);
+      "portHooked=", sandbox.__zcpCoreDiag && sandbox.__zcpCoreDiag.portHooked);
   }
 
   // 模拟主进程把 ServicePort 转交渲染层（两种格式都走这一条监听）。
@@ -371,8 +371,8 @@ function boot(doc, bridgeState, opts) {
     try { fn(handoff); } catch (e) { bad.push("ServicePort 接管抛异常: " + e.message); }
   }
   if (process.env.PILOT_DEBUG) {
-    console.error("[debug] after handoff portHooked=", sandbox.__zpilotDiag && sandbox.__zpilotDiag.portHooked,
-      "port.__zpilot=", port.__zpilot, "portListeners=", (port.__listeners.message || []).length);
+    console.error("[debug] after handoff portHooked=", sandbox.__zcpCoreDiag && sandbox.__zcpCoreDiag.portHooked,
+      "port.__zcpCore=", port.__zcpCore, "portListeners=", (port.__listeners.message || []).length);
   }
 
   return {
@@ -414,9 +414,9 @@ async function main() {
   await tickAsync();
 
   const toggle = doc.querySelector(TOGGLE);
-  check(!!toggle, "桥存在时输入框开关没挂上（diag=" + JSON.stringify(h.sandbox.__zpilotDiag.toggleHiddenReason || h.sandbox.__zpilotDiag.toggleError) + "）");
-  check(h.sandbox.__zpilotDiag.bridgePresent === true, "diag.bridgePresent 应为 true");
-  check(!h.sandbox.__zpilotDiag.portStarted, "绝不允许 portStarted（会吃掉应用 Initialize 握手）");
+  check(!!toggle, "桥存在时输入框开关没挂上（diag=" + JSON.stringify(h.sandbox.__zcpCoreDiag.toggleHiddenReason || h.sandbox.__zcpCoreDiag.toggleError) + "）");
+  check(h.sandbox.__zcpCoreDiag.bridgePresent === true, "diag.bridgePresent 应为 true");
+  check(!h.sandbox.__zcpCoreDiag.portStarted, "绝不允许 portStarted（会吃掉应用 Initialize 握手）");
 
   if (toggle) {
     // ① 落点：必须紧跟在「模式切换」右侧，而不是 some-other-control 之后 / 行尾
@@ -462,7 +462,7 @@ async function main() {
   const tg2 = doc2.querySelector(TOGGLE);
   check(!!tg2, "关闭态也应显示开关（让用户看得见为什么不自动继续）");
   check(tg2 && tg2.getAttribute("data-state") === "off", "关闭保存后 data-state 应为 off，实际=" + (tg2 && tg2.getAttribute("data-state")));
-  check(h2.sandbox.__zpilotDiag.ui && h2.sandbox.__zpilotDiag.ui.armed === false,
+  check(h2.sandbox.__zcpCoreDiag.ui && h2.sandbox.__zcpCoreDiag.ui.armed === false,
     "enabled=false 时 armed 必须为 false（不再自动继续）");
 
   // ============ 场景 2b：全局暂停（开关仍开，但 paused） ============
@@ -475,7 +475,7 @@ async function main() {
   const tg2b = doc2b.querySelector(TOGGLE);
   check(tg2b && tg2b.getAttribute("data-state") === "paused", "paused 时 data-state 应为 paused，实际=" + (tg2b && tg2b.getAttribute("data-state")));
   check(tg2b && tg2b.getAttribute("data-runtime") === "1", "暂停≠关闭：runtime 仍为开，data-runtime 应为 1");
-  check(h2b.sandbox.__zpilotDiag.ui && h2b.sandbox.__zpilotDiag.ui.armed === false,
+  check(h2b.sandbox.__zcpCoreDiag.ui && h2b.sandbox.__zcpCoreDiag.ui.armed === false,
     "paused 时 armed 必须为 false（暂停不是关闭，但仍不得自动继续）");
 
   // ============ 场景 3a：意外中断恢复 —— journal 有未收尾轮次 → 写回并发送 ============
@@ -486,7 +486,7 @@ async function main() {
   await tickAsync();
   hA.tick();
   await tickAsync();
-  const dA = hA.sandbox.__zpilotDiag;
+  const dA = hA.sandbox.__zcpCoreDiag;
   check(dA.recoverAttempt === 1, "崩溃恢复必须自动尝试 1 次，diag.recoverResult=" + dA.recoverResult + " skip=" + dA.recoverSkip);
   check(dA.recoverWrite === true, "五级写回没成功：method=" + dA.writeMethod + " result=" + dA.recoverResult);
   check(tA.input.value === "继续", "续跑文本没写进输入框，实际=" + JSON.stringify(tA.input.value));
@@ -515,7 +515,7 @@ async function main() {
   await tickAsync();
   hB.tick();
   await tickAsync();
-  const dB = hB.sandbox.__zpilotDiag;
+  const dB = hB.sandbox.__zcpCoreDiag;
   const pendB = hB.pendingTimers();
   check(dB.recoverAttempt === 1 && pendB >= 1,
     "前置条件没成立：应有 1 次尝试 + 至少 1 个排队重试（attempt=" + dB.recoverAttempt + " 排队=" + pendB + "）");
@@ -539,7 +539,7 @@ async function main() {
   await tickAsync();
   hC.tick();
   await tickAsync();
-  const dC = hC.sandbox.__zpilotDiag;
+  const dC = hC.sandbox.__zcpCoreDiag;
   check(hC.pendingTimers() >= 1, "对照组：排队定时器必须可执行");
   hC.runTimers(1);
   await tickAsync();
@@ -557,7 +557,7 @@ async function main() {
     await tickAsync();
     check(!doc4.querySelector(TOGGLE), "桥缺失时不该造出开关（点了也没用，还会误导用户）");
     check(!doc4.querySelector(STATUS), "桥缺失时不该造出任何状态节点");
-    check(h4.sandbox.__zpilotDiag.bridgePresent === false, "diag 应记录桥缺失，便于排障");
+    check(h4.sandbox.__zcpCoreDiag.bridgePresent === false, "diag 应记录桥缺失，便于排障");
   } catch (err) { threw = err; }
   check(!threw, "桥缺失时抛异常会打断 renderer 启动：" + (threw && threw.message));
 
@@ -608,9 +608,9 @@ async function main() {
   await tickAsync();
   const tg7 = doc7.querySelector(TOGGLE);
   check(!!tg7 && t7.row.children[t7.row.children.length - 1] === tg7,
-    "前置条件没成立：无锚点时应退化到工具栏行尾，where=" + h7.sandbox.__zpilotDiag.toggleWhere);
-  check(h7.sandbox.__zpilotDiag.toggleWhere === "toolbar-end(待搬回)",
-    "退化态必须标记待搬回，实际=" + h7.sandbox.__zpilotDiag.toggleWhere);
+    "前置条件没成立：无锚点时应退化到工具栏行尾，where=" + h7.sandbox.__zcpCoreDiag.toggleWhere);
+  check(h7.sandbox.__zcpCoreDiag.toggleWhere === "toolbar-end(待搬回)",
+    "退化态必须标记待搬回，实际=" + h7.sandbox.__zcpCoreDiag.toggleWhere);
   t7.row.insertBefore(mode7, t7.other);  // 锚点后到（React 补挂）
   h7.tick();
   await tickAsync();
@@ -618,8 +618,8 @@ async function main() {
   check(t7.mode.nextSibling === tg7,
     "★ 锚点后到后必须搬回「模式切换」右侧，实际 row 顺序=" +
     t7.row.children.map((c) => c.getAttribute("data-testid") || c.tagName).join(">"));
-  check(h7.sandbox.__zpilotDiag.toggleWhere === "after-trigger",
-    "搬回后 diag.toggleWhere 应为 after-trigger，实际=" + h7.sandbox.__zpilotDiag.toggleWhere);
+  check(h7.sandbox.__zcpCoreDiag.toggleWhere === "after-trigger",
+    "搬回后 diag.toggleWhere 应为 after-trigger，实际=" + h7.sandbox.__zcpCoreDiag.toggleWhere);
 
   // ============ 场景 8：TurnError 失败轮次 → 渲染层兜底补发「继续」 ============
   // 这是官方 Stop hook 的结构性盲区：内核只在成功收尾分支调用 runStopHooks，
@@ -634,12 +634,12 @@ async function main() {
   await tickAsync();
   h8.tick();
   await tickAsync();
-  check(h8.sandbox.__zpilotDiag.portHooked === true,
+  check(h8.sandbox.__zcpCoreDiag.portHooked === true,
     "ServicePort 未被接管，turnHeader 事件无法到达渲染层");
   h8.feed([{ kind: "turnHeader", sessionId: "s-1", turnId: "turn-f1", state: "running",
              origin: "userInput", executionKind: "agent", startedAt: 1 }]);
   h8.feed([failedRow()]);
-  const d8 = h8.sandbox.__zpilotDiag;
+  const d8 = h8.sandbox.__zcpCoreDiag;
   check(d8.failedTurn && d8.failedTurn.reason === "scheduled",
     "失败轮次应排入兜底续跑，diag.failedTurn=" + JSON.stringify(d8.failedTurn));
   check(h8.pendingTimers() >= 1, "失败轮次应先等宽限期，不应立刻发送");
@@ -673,7 +673,7 @@ async function main() {
     const h = boot(doc, state, opts);
     await tickAsync(); h.tick(); await tickAsync();
     h.feed([failedRow(row)]);
-    return { h, tree, d: h.sandbox.__zpilotDiag };
+    return { h, tree, d: h.sandbox.__zcpCoreDiag };
   };
   const off = await bootFailed({ sessions: { "s-1": { mode: "off" } } }, {});
   check(off.d.failedTurn && off.d.failedTurn.reason === "not-armed" && off.tree.send.__clicks === 0,
@@ -705,8 +705,8 @@ async function main() {
   const interrupted = boot(interruptedDoc, {}, {});
   await tickAsync(); interrupted.tick(); await tickAsync();
   interrupted.feed([failedRow({ state: "completedInterrupted" })]);
-  check(!interrupted.sandbox.__zpilotDiag.failedTurn && interruptedTree.send.__clicks === 0,
-    "completedInterrupted 不得走 TurnError 兜底，实际 diag=" + JSON.stringify(interrupted.sandbox.__zpilotDiag.failedTurn));
+  check(!interrupted.sandbox.__zcpCoreDiag.failedTurn && interruptedTree.send.__clicks === 0,
+    "completedInterrupted 不得走 TurnError 兜底，实际 diag=" + JSON.stringify(interrupted.sandbox.__zcpCoreDiag.failedTurn));
 
   if (bad.length) {
     console.error("pilot mount smoke FAILED（" + bad.length + " 项）：");

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-zcode_patcher 回归测试（纯标准库 unittest，无第三方依赖）
+zcp_patcher 回归测试（纯标准库 unittest，无第三方依赖）
 ==========================================================
 运行：
   python -m unittest discover -s tests -v
@@ -34,10 +34,10 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 for _cand in (_HERE.parent / "scripts",
               _HERE.parent / "skills" / "zcode-pilot" / "scripts"):
-    if (_cand / "zcode_patcher.py").is_file():
+    if (_cand / "zcp_patcher.py").is_file():
         sys.path.insert(0, str(_cand))
         break
-import zcode_patcher as zp          # noqa: E402
+import zcp_patcher as zp          # noqa: E402
 
 
 # ------------------------------------------------------------------ 测试夹具
@@ -89,17 +89,17 @@ def quiet(fn, *a, **kw):
 
 
 @contextlib.contextmanager
-def patcher_stubbed(sync, states=None, verdicts=None, legacy=False):
-    """把 sync 里会真正碰客户端的地方换成记录桩，并返回调用记录列表。
+def patcher_stubbed(zcp_sync, states=None, verdicts=None, legacy=False):
+    """把 zcp_sync 里会真正碰客户端的地方换成记录桩，并返回调用记录列表。
 
-    **单元测试绝不能真的跑 zcode_patcher.py** —— 那会按当前开关改写本机的 app.asar，
+    **单元测试绝不能真的跑 zcp_patcher.py** —— 那会按当前开关改写本机的 app.asar，
     跑一次测试就顺手把用户的客户端改了。所以：
       check_state   → 查表返回（默认全 "on"，即「客户端已一致」，最安全的基线）
       run_patcher   → 只记录，不执行（默认返回 "ok"；verdicts 可让某组参数返回 "refused"/"fail"）
       start_watchdog→ 只记录，不起进程
       legacy_cleanup_needed → 默认 False
 
-    `legacy_cleanup_needed` **必须一起打桩**：它内部直接 subprocess 跑 `zcode_patcher.py
+    `legacy_cleanup_needed` **必须一起打桩**：它内部直接 subprocess 跑 `zcp_patcher.py
     --cleanup-legacy --check` 去探测**本机**客户端。不打桩的话，「开发机客户端里恰好还有
     历史滑条残留」会让断言随机器漂移（有残留就多出一个 watchdog 的 cleanup_legacy 键）。
     需要覆盖残留路径的用例显式传 legacy=True。
@@ -109,28 +109,28 @@ def patcher_stubbed(sync, states=None, verdicts=None, legacy=False):
     table = states or {}
     vtable = verdicts or {}
     calls = []
-    orig = (sync.check_state, sync.run_patcher, sync.start_watchdog,
-            sync.legacy_cleanup_needed, sync.plugin_update_pending,
-            sync.write_inject_record, sync.mark_reinject_pending,
-            sync.clear_reinject_pending)
-    sync.check_state = lambda args: table.get(tuple(args), "on")
-    sync.run_patcher = lambda args, revert: (
+    orig = (zcp_sync.check_state, zcp_sync.run_patcher, zcp_sync.start_watchdog,
+            zcp_sync.legacy_cleanup_needed, zcp_sync.plugin_update_pending,
+            zcp_sync.write_inject_record, zcp_sync.mark_reinject_pending,
+            zcp_sync.clear_reinject_pending)
+    zcp_sync.check_state = lambda args: table.get(tuple(args), "on")
+    zcp_sync.run_patcher = lambda args, revert: (
         calls.append(("run", tuple(args), revert)),
         vtable.get(tuple(args), "ok"))[1]
-    sync.start_watchdog = lambda wanted: calls.append(("watchdog", dict(wanted))) if wanted else None
-    sync.legacy_cleanup_needed = lambda: bool(legacy)
+    zcp_sync.start_watchdog = lambda wanted: calls.append(("watchdog", dict(wanted))) if wanted else None
+    zcp_sync.legacy_cleanup_needed = lambda: bool(legacy)
     # 插件市场更新判定会读本机真实的市场登记表/注入记录：不打桩会让断言随开发机漂移。
-    sync.plugin_update_pending = lambda: {}
-    sync.write_inject_record = lambda *a, **kw: None
-    sync.mark_reinject_pending = lambda keys: None
-    sync.clear_reinject_pending = lambda: None
+    zcp_sync.plugin_update_pending = lambda: {}
+    zcp_sync.write_inject_record = lambda *a, **kw: None
+    zcp_sync.mark_reinject_pending = lambda keys: None
+    zcp_sync.clear_reinject_pending = lambda: None
     try:
         yield calls
     finally:
-        (sync.check_state, sync.run_patcher, sync.start_watchdog,
-         sync.legacy_cleanup_needed, sync.plugin_update_pending,
-         sync.write_inject_record, sync.mark_reinject_pending,
-         sync.clear_reinject_pending) = orig
+        (zcp_sync.check_state, zcp_sync.run_patcher, zcp_sync.start_watchdog,
+         zcp_sync.legacy_cleanup_needed, zcp_sync.plugin_update_pending,
+         zcp_sync.write_inject_record, zcp_sync.mark_reinject_pending,
+         zcp_sync.clear_reinject_pending) = orig
 
 
 def make_cjs(anchor: str, prefix: str = "/*pre*/", suffix: str = "/*post*/",
@@ -1078,11 +1078,11 @@ class TestAllFlag(unittest.TestCase):
         self.assertIn("--all", r.stdout)
 
     def test_all_covers_every_plugin_switch(self):
-        """插件开关表（sync.py 的 PATCHES）与 --all 必须一一对应，否则
+        """插件开关表（zcp_sync.py 的 PATCHES）与 --all 必须一一对应，否则
         「在插件里能开关、但命令行 --all 覆盖不到」这类不一致会悄悄存在。
         例外只有 core_patch：它是无参数的内核补丁（≤3.11 专用）。"""
-        import sync
-        switch_keys = {key for key, _args, _repack in sync.PATCHES}
+        import zcp_sync
+        switch_keys = {key for key, _args, _repack in zcp_sync.PATCHES}
         self.assertEqual(switch_keys - {"core_patch"}, set(zp.ALL_PATCH_FLAGS))
 
     def test_kernel_patch_is_included_by_all(self):
@@ -1164,13 +1164,13 @@ class TestCheckStateWording(unittest.TestCase):
 
     锁死的是一个真实故障：`--reasoning-config --check` 打的是
     「[ ] …（新建规则）」/「[=] 档位配置已是最新，无需写入」，一个
-    `已打 / 未打 / 不适用` 都没有 → 判定落回 unknown → sync 报
+    `已打 / 未打 / 不适用` 都没有 → 判定落回 unknown → zcp_sync 报
     「未处理: reasoning_config(状态未知)」，这个开关**既不会被写入也不会被还原**。
     注意不能用「已是最新」判 on：有待写入项时它也会打印（说的是另外 N 个已配好的模型）。
     """
 
     def _state(self, text: str) -> str:
-        import sync
+        import zcp_sync
 
         class _R:
             returncode = 0
@@ -1180,12 +1180,12 @@ class TestCheckStateWording(unittest.TestCase):
         class _FakeSub:
             run = staticmethod(lambda *a, **kw: _R())
 
-        orig = sync.subprocess
-        sync.subprocess = _FakeSub          # 只换 sync 里的名字，不动全局 subprocess
+        orig = zcp_sync.subprocess
+        zcp_sync.subprocess = _FakeSub          # 只换 zcp_sync 里的名字，不动全局 subprocess
         try:
-            return sync.check_state(["--reasoning-config"])
+            return zcp_sync.check_state(["--reasoning-config"])
         finally:
-            sync.subprocess = orig
+            zcp_sync.subprocess = orig
 
     def test_reasoning_config_pending_is_off(self):
         out = ("=== 3.14+ 原生档位配置（provider_config.json），模式：检查 ===\n"
@@ -1218,7 +1218,7 @@ class TestScriptInjectStaleDetection(TempCase):
 
     锁死的是一个真实故障：`_process_script_inject` 的 check 分支原先只判
     「index.html 有 tag 且脚本条目存在」，**从不比对脚本内容** —— 于是旧脚本也打
-    裸「已打」→ `sync.check_state()` 判 on → `run_sync` 走 `continue`（视为已一致）
+    裸「已打」→ `zcp_sync.check_state()` 判 on → `run_sync` 走 `continue`（视为已一致）
     → **脚本改了永远不生效，而且一句报错都没有**。
 
     这与 `--model-puller` 那条链路（会算 old_script 并输出「含旧版组件」）不一致，
@@ -1249,7 +1249,7 @@ class TestScriptInjectStaleDetection(TempCase):
     def test_old_script_is_reported_stale(self):
         self._build(b"console.log('old-version');")
         self.assertIn("含旧版组件", self._check(),
-                      "旧版脚本被误报成「已打」→ sync 会永久跳过它，改动永不生效")
+                      "旧版脚本被误报成「已打」→ zcp_sync 会永久跳过它，改动永不生效")
 
     def test_same_script_is_plain_on(self):
         self._build(b"console.log('new-version');")
@@ -1281,7 +1281,7 @@ class TestProcessProbeDecodesSafely(unittest.TestCase):
     """
 
     def _run_probe(self, stdout_value):
-        import zcode_patcher as zp
+        import zcp_patcher as zp
 
         class _FakeProc:
             def __init__(self, out):
@@ -1331,7 +1331,7 @@ class TestZcodeRunningPosix(unittest.TestCase):
               "/MacOS/ZCode Helper --type=gpu-process")
 
     def setUp(self):
-        import zcode_patcher as zp
+        import zcp_patcher as zp
         self.zp = zp
         self._orig_run = zp.subprocess.run
 
@@ -1398,16 +1398,16 @@ class TestZcodeRunningPosix(unittest.TestCase):
 
 
 class TestApplyAfterExitPathGuard(unittest.TestCase):
-    """apply_after_exit 的看护轮询每 3s 调一次 zcode_running()（最长 24h）。
+    """zcp_watchdog 的看护轮询每 3s 调一次 zcode_running()（最长 24h）。
 
     曾经的写法是每次 sys.path.insert(0, HERE)——列表无界增长（24h 约 2.9 万个
     重复项）。_import_patcher 必须只在缺失时插入；同时不得破坏 import 缓存。
     """
 
     def test_repeated_imports_do_not_grow_sys_path(self):
-        import apply_after_exit as aae
+        import zcp_watchdog as aae
         zp = aae._import_patcher()
-        self.assertIs(zp, sys.modules["zcode_patcher"], "应当复用缓存的模块对象")
+        self.assertIs(zp, sys.modules["zcp_patcher"], "应当复用缓存的模块对象")
         baseline = len(sys.path)
         for _ in range(200):                 # 模拟 10 分钟轮询量级的调用
             aae._import_patcher()
@@ -1417,7 +1417,7 @@ class TestApplyAfterExitPathGuard(unittest.TestCase):
 class TestNoConsoleWindowFlags(unittest.TestCase):
     """每个会起 console 子进程的调用都必须带「别弹控制台窗口」的标志。
 
-    为什么值得钉死：钩子用 `--detach` 把 sync.py 拉成 `DETACHED_PROCESS|CREATE_NO_WINDOW`
+    为什么值得钉死：钩子用 `--detach` 把 zcp_sync.py 拉成 `DETACHED_PROCESS|CREATE_NO_WINDOW`
     的后台 worker —— 也就是**没有控制台**。Windows 的语义是「无控制台的父进程创建 console
     子进程时，系统会新建一个控制台并**显示**出来」，于是 worker 里每调一次
     `check_state()` 就闪一个 cmd 窗口；而 `run_sync()` 会为每个开关调一次 —— 一个会话能弹 8 个以上。
@@ -1427,8 +1427,8 @@ class TestNoConsoleWindowFlags(unittest.TestCase):
       * 传 `CREATE_NO_WINDOW` → **0 个**
     注意 `capture_output=True` 挡不住它 —— 它管的是管道，不是控制台分配。
 
-    `apply_after_exit.py` 早就知道这个坑（注释里写着「pythonw 无控制台…会每次新弹 cmd 窗口」），
-    但 sync.py / zcode_patcher.py / doctor.py 漏了。这条测试就是防它再漏。
+    `zcp_watchdog.py` 早就知道这个坑（注释里写着「pythonw 无控制台…会每次新弹 cmd 窗口」），
+    但 zcp_sync.py / zcp_patcher.py / zcp_doctor.py 漏了。这条测试就是防它再漏。
 
     允许两种写法：`**no_window_kwargs()`（推荐）或 `creationflags=...`。
     确实不需要的调用，在调用处同一行写 `# no-window-ok: <理由>` 显式豁免。
@@ -1438,7 +1438,7 @@ class TestNoConsoleWindowFlags(unittest.TestCase):
     def _mask(src: str) -> str:
         """把注释与字符串**内容**替换成空格（保持长度与行号不变）。
 
-        必须屏蔽：`_console.py` 的文档里就写着 `subprocess.run(capture_output=True)` 作为例子，
+        必须屏蔽：`zcp_console.py` 的文档里就写着 `subprocess.run(capture_output=True)` 作为例子，
         不屏蔽会把它当成真实调用误报。标记 `# no-window-ok:` 是注释，所以判定时要用原文。
         """
         import io as _io
@@ -1502,8 +1502,8 @@ class TestNoConsoleWindowFlags(unittest.TestCase):
 
     def test_no_window_helper_is_a_noop_off_windows(self):
         """helper 在非 Windows 上必须返回空 dict，否则会污染别的平台。"""
-        import _console
-        self.assertEqual(set(_console.no_window_kwargs()),
+        import zcp_console
+        self.assertEqual(set(zcp_console.no_window_kwargs()),
                          {"creationflags"} if os.name == "nt" else set())
 
 
@@ -1835,49 +1835,49 @@ class TestTpsSidePaneIsolation(unittest.TestCase):
 
 
 class TestDoctor(unittest.TestCase):
-    """doctor.py 是「插件装了没生效」时的第一入口。它靠一批常量去定位安装目录、
+    """zcp_doctor.py 是「插件装了没生效」时的第一入口。它靠一批常量去定位安装目录、
     配置键和开关表——这些常量一旦和真实实现漂移，自检报告会指向错误的目录，
-    比没有自检更误导。所以这里把它们和 plugin.json / sync.py 对齐钉死。"""
+    比没有自检更误导。所以这里把它们和 plugin.json / zcp_sync.py 对齐钉死。"""
 
     def test_plugin_name_matches_manifest(self):
-        import doctor
+        import zcp_doctor
         manifest = json.loads((_HERE.parent / ".zcode-plugin" / "plugin.json")
                               .read_text(encoding="utf-8"))
-        self.assertEqual(doctor.PLUGIN_NAME, manifest["name"],
-                         "doctor 按 PLUGIN_NAME 前缀找安装目录与配置键，必须等于清单里的 name")
+        self.assertEqual(zcp_doctor.PLUGIN_NAME, manifest["name"],
+                         "zcp_doctor 按 PLUGIN_NAME 前缀找安装目录与配置键，必须等于清单里的 name")
 
     def test_patch_key_table_covers_every_switch(self):
-        import doctor
-        import sync
-        self.assertEqual({k for k, _label in doctor.PATCH_KEYS} | {"core_patch"},
-                         {k for k, _args, _repack in sync.PATCHES},
-                         "doctor 的开关表漏项 → 自检报告会漏掉某个功能的状态")
+        import zcp_doctor
+        import zcp_sync
+        self.assertEqual({k for k, _label in zcp_doctor.PATCH_KEYS} | {"core_patch"},
+                         {k for k, _args, _repack in zcp_sync.PATCHES},
+                         "zcp_doctor 的开关表漏项 → 自检报告会漏掉某个功能的状态")
 
     def test_repack_set_matches_sync(self):
-        """doctor 用这个集合区分「重打包级」补丁，必须与 sync.PATCHES 的第三列一致。"""
-        import doctor
-        import sync
-        self.assertEqual(doctor.REPACK_KEYS, {k for k, _a, r in sync.PATCHES if r})
+        """zcp_doctor 用这个集合区分「重打包级」补丁，必须与 zcp_sync.PATCHES 的第三列一致。"""
+        import zcp_doctor
+        import zcp_sync
+        self.assertEqual(zcp_doctor.REPACK_KEYS, {k for k, _a, r in zcp_sync.PATCHES if r})
 
     def test_prefix_entries_only_matches_this_plugin(self):
-        import doctor
+        import zcp_doctor
         cfg = {"plugins": {
             "options": {"zcode-pilot@some-market": {"tps_footer": True},
                         "other-plugin@m": {"x": 1}},
             "enabledPlugins": {"zcode-pilot@some-market": True},
         }}
-        self.assertEqual(list(doctor._prefix_entries(cfg, "options")),
+        self.assertEqual(list(zcp_doctor._prefix_entries(cfg, "options")),
                          ["zcode-pilot@some-market"])
-        self.assertEqual(list(doctor._prefix_entries(cfg, "enabledPlugins")),
+        self.assertEqual(list(zcp_doctor._prefix_entries(cfg, "enabledPlugins")),
                          ["zcode-pilot@some-market"])
         # 缺失 / 类型异常都不能抛异常（config.json 是用户可手改的文件）
-        self.assertEqual(doctor._prefix_entries({}, "options"), {})
-        self.assertEqual(doctor._prefix_entries({"plugins": {"options": []}}, "options"), {})
-        self.assertEqual(doctor._prefix_entries(None, "options"), {})
+        self.assertEqual(zcp_doctor._prefix_entries({}, "options"), {})
+        self.assertEqual(zcp_doctor._prefix_entries({"plugins": {"options": []}}, "options"), {})
+        self.assertEqual(zcp_doctor._prefix_entries(None, "options"), {})
 
     def test_auto_fix_enables_plugin(self):
         """auto_fix 必须能将 disabled 的 enabledPlugins 修复为 true。"""
-        import doctor
+        import zcp_doctor
         with tempfile.TemporaryDirectory() as d:
             cfg_path = Path(d) / "config.json"
             cfg_path.write_text(json.dumps({
@@ -1886,38 +1886,38 @@ class TestDoctor(unittest.TestCase):
                     "enabledPlugins": {"zcode-pilot@market": False}
                 }
             }), encoding="utf-8")
-            orig_find = doctor._find_configs
-            orig_zp = doctor._load_patcher
-            doctor._find_configs = lambda: [cfg_path]
+            orig_find = zcp_doctor._find_configs
+            orig_zp = zcp_doctor._load_patcher
+            zcp_doctor._find_configs = lambda: [cfg_path]
             mock_zp = unittest.mock.MagicMock()
             mock_zp.zcode_running.return_value = True
-            doctor._load_patcher = lambda: mock_zp
+            zcp_doctor._load_patcher = lambda: mock_zp
             try:
                 buf = io.StringIO()
                 with contextlib.redirect_stdout(buf):
-                    rc = doctor.auto_fix()
+                    rc = zcp_doctor.auto_fix()
                 self.assertEqual(rc, 0)
                 fixed = json.loads(cfg_path.read_text(encoding="utf-8"))
                 self.assertTrue(fixed["plugins"]["enabled"])
                 self.assertTrue(fixed["plugins"]["enabledPlugins"]["zcode-pilot@market"])
             finally:
-                doctor._find_configs = orig_find
-                doctor._load_patcher = orig_zp
+                zcp_doctor._find_configs = orig_find
+                zcp_doctor._load_patcher = orig_zp
 
     def test_manifest_version_reads_both_layouts(self):
-        import doctor
+        import zcp_doctor
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / ".claude-plugin").mkdir()
             (root / ".claude-plugin" / "plugin.json").write_text(
                 json.dumps({"name": "x", "version": "1.2.3"}), encoding="utf-8")
-            self.assertEqual(doctor._manifest_version(root), "1.2.3")
-            self.assertEqual(doctor._manifest_version(root / "nope"), "?")
+            self.assertEqual(zcp_doctor._manifest_version(root), "1.2.3")
+            self.assertEqual(zcp_doctor._manifest_version(root / "nope"), "?")
 
     def test_json_mode_emits_parseable_report(self):
         """--json 是让用户「贴给别人看」的输出，必须是合法 JSON 且包含关键字段。"""
-        import doctor
-        r = subprocess.run([sys.executable, str(doctor.__file__), "--json"],
+        import zcp_doctor
+        r = subprocess.run([sys.executable, str(zcp_doctor.__file__), "--json"],
                            capture_output=True, text=True, timeout=120)
         self.assertEqual(r.returncode, 0, r.stderr[-400:])
         data = json.loads(r.stdout)
@@ -1927,28 +1927,28 @@ class TestDoctor(unittest.TestCase):
 
 class TestSyncHeartbeat(unittest.TestCase):
     """心跳文件 _sync.last 是「钩子到底跑没跑」的唯一证据：
-    没拨过开关时 sync 什么都不做、日志也是空的，「钩子没触发」与「触发了但无事可做」
+    没拨过开关时 zcp_sync 什么都不做、日志也是空的，「钩子没触发」与「触发了但无事可做」
     在日志里长得一模一样。所以必须保证它在任何一条提前返回的路径上都被写出来。"""
 
     def setUp(self):
-        import sync
-        self.sync = sync
-        self._orig = (sync.CONFIG, sync.STAMP, sync.LOG, sync.MARKER)
+        import zcp_sync
+        self.zcp_sync = zcp_sync
+        self._orig = (zcp_sync.CONFIG, zcp_sync.STAMP, zcp_sync.LOG, zcp_sync.MARKER)
         self._tmp = tempfile.TemporaryDirectory(prefix="zpatch-hb-", ignore_cleanup_errors=True)
         d = Path(self._tmp.name)
-        sync.CONFIG = d / "config.json"       # 故意不存在
-        sync.STAMP = d / "_sync.last"
-        sync.LOG = d / "_sync.log"
-        sync.MARKER = d / "_autoinject.done"  # 别把标记写进真实安装目录
+        zcp_sync.CONFIG = d / "config.json"       # 故意不存在
+        zcp_sync.STAMP = d / "_sync.last"
+        zcp_sync.LOG = d / "_sync.log"
+        zcp_sync.MARKER = d / "_autoinject.done"  # 别把标记写进真实安装目录
 
     def tearDown(self):
-        (self.sync.CONFIG, self.sync.STAMP, self.sync.LOG,
-         self.sync.MARKER) = self._orig
+        (self.zcp_sync.CONFIG, self.zcp_sync.STAMP, self.zcp_sync.LOG,
+         self.zcp_sync.MARKER) = self._orig
         self._tmp.cleanup()
 
     def test_beat_writes_timestamp_and_message(self):
-        self.sync.beat("单元测试")
-        text = self.sync.STAMP.read_text(encoding="utf-8")
+        self.zcp_sync.beat("单元测试")
+        text = self.zcp_sync.STAMP.read_text(encoding="utf-8")
         self.assertIn("单元测试", text)
         self.assertRegex(text, r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 
@@ -1959,20 +1959,20 @@ class TestSyncHeartbeat(unittest.TestCase):
         `plugins.options`，旧逻辑把「没表态」当成「不要做」，于是装完重启什么都没发生，
         而用户在界面上看不出任何原因。现在退回清单默认值，装完即自动注入。
         """
-        with patcher_stubbed(self.sync) as calls:
-            quiet(self.sync.main)
-        text = self.sync.STAMP.read_text(encoding="utf-8")
+        with patcher_stubbed(self.zcp_sync) as calls:
+            quiet(self.zcp_sync.main)
+        text = self.zcp_sync.STAMP.read_text(encoding="utf-8")
         self.assertTrue(text.strip(), "心跳文件不能为空")
         self.assertIn("从未保存过开关", text)
         self.assertEqual(calls, [], "开关都已是目标状态时不应产生任何写入")
 
     def test_main_beats_when_nothing_to_do(self):
         """配置存在但所有开关都已一致时，也要留下心跳并写明「无需改动」。"""
-        self.sync.CONFIG.write_text(json.dumps(
+        self.zcp_sync.CONFIG.write_text(json.dumps(
             {"plugins": {"options": {"zcode-pilot@m": {}}}}), encoding="utf-8")
-        with patcher_stubbed(self.sync):
-            quiet(self.sync.main)
-        text = self.sync.STAMP.read_text(encoding="utf-8")
+        with patcher_stubbed(self.zcp_sync):
+            quiet(self.zcp_sync.main)
+        text = self.zcp_sync.STAMP.read_text(encoding="utf-8")
         self.assertTrue(text.strip(), "心跳文件不能为空")
 
 
@@ -1986,64 +1986,64 @@ class TestSyncModes(unittest.TestCase):
     """
 
     def setUp(self):
-        import sync
-        self.sync = sync
-        self._orig = (sync.CONFIG, sync.STAMP, sync.LOG, sync.MARKER, list(sys.argv))
+        import zcp_sync
+        self.zcp_sync = zcp_sync
+        self._orig = (zcp_sync.CONFIG, zcp_sync.STAMP, zcp_sync.LOG, zcp_sync.MARKER, list(sys.argv))
         self._tmp = tempfile.TemporaryDirectory(prefix="zpatch-mode-", ignore_cleanup_errors=True)
         d = Path(self._tmp.name)
-        sync.CONFIG = d / "config.json"       # 故意不存在
-        sync.STAMP = d / "_sync.last"
-        sync.LOG = d / "_sync.log"
-        sync.MARKER = d / "_autoinject.done"  # 别把标记写进真实安装目录
+        zcp_sync.CONFIG = d / "config.json"       # 故意不存在
+        zcp_sync.STAMP = d / "_sync.last"
+        zcp_sync.LOG = d / "_sync.log"
+        zcp_sync.MARKER = d / "_autoinject.done"  # 别把标记写进真实安装目录
 
     def tearDown(self):
-        (self.sync.CONFIG, self.sync.STAMP, self.sync.LOG,
-         self.sync.MARKER) = self._orig[:4]
+        (self.zcp_sync.CONFIG, self.zcp_sync.STAMP, self.zcp_sync.LOG,
+         self.zcp_sync.MARKER) = self._orig[:4]
         sys.argv[:] = self._orig[4]
         self._tmp.cleanup()
 
     def _run(self, *args):
-        sys.argv[:] = ["sync.py", *args]
-        quiet(self.sync.main)
+        sys.argv[:] = ["zcp_sync.py", *args]
+        quiet(self.zcp_sync.main)
 
     def test_detach_spawns_worker_and_returns(self):
         spawned = []
-        orig = self.sync.spawn_detached
-        self.sync.spawn_detached = lambda extra: (spawned.append(extra), True)[1]
+        orig = self.zcp_sync.spawn_detached
+        self.zcp_sync.spawn_detached = lambda extra: (spawned.append(extra), True)[1]
         try:
-            with patcher_stubbed(self.sync):
+            with patcher_stubbed(self.zcp_sync):
                 self._run("--detach")
         finally:
-            self.sync.spawn_detached = orig
+            self.zcp_sync.spawn_detached = orig
         self.assertEqual(spawned, [["--worker", "--from-hook"]])
-        self.assertIn("[钩子]", self.sync.STAMP.read_text(encoding="utf-8"))
+        self.assertIn("[钩子]", self.zcp_sync.STAMP.read_text(encoding="utf-8"))
 
     def test_detach_falls_back_to_foreground_when_spawn_fails(self):
         """后台起不来（比如被安全软件拦）时必须自己把活干完，而不是静默失败。"""
-        orig = self.sync.spawn_detached
-        self.sync.spawn_detached = lambda extra: False
+        orig = self.zcp_sync.spawn_detached
+        self.zcp_sync.spawn_detached = lambda extra: False
         try:
-            with patcher_stubbed(self.sync):
+            with patcher_stubbed(self.zcp_sync):
                 self._run("--detach")
         finally:
-            self.sync.spawn_detached = orig
-        text = self.sync.STAMP.read_text(encoding="utf-8")
+            self.zcp_sync.spawn_detached = orig
+        text = self.zcp_sync.STAMP.read_text(encoding="utf-8")
         self.assertTrue(text.strip(), "兜底路径也必须留下心跳")
         self.assertIn("从未保存过开关", text)
 
     def test_worker_records_the_full_chain(self):
         """心跳要能证明「钩子 → 后台」这条链，否则看不出是钩子拉起来的。"""
-        with patcher_stubbed(self.sync):
+        with patcher_stubbed(self.zcp_sync):
             self._run("--worker", "--from-hook")
-        self.assertIn("[钩子→后台]", self.sync.STAMP.read_text(encoding="utf-8"))
+        self.assertIn("[钩子→后台]", self.zcp_sync.STAMP.read_text(encoding="utf-8"))
 
     def test_hook_mode_never_writes_to_stdout(self):
         """钩子的 stdout 会被按严格 JSON schema 校验：输出非 JSON 会被判为「运行失败」。
         脚本副作用虽已生效，但日志里会留下假故障，所以后台路径必须一声不吭。"""
         buf = io.StringIO()
-        with patcher_stubbed(self.sync):
+        with patcher_stubbed(self.zcp_sync):
             with contextlib.redirect_stdout(buf):
-                self.sync.run_sync(echo=False)
+                self.zcp_sync.run_sync(echo=False)
         self.assertEqual(buf.getvalue(), "")
 
 
@@ -2064,19 +2064,19 @@ class TestSyncStaleIsReinjected(unittest.TestCase):
     """
 
     def setUp(self):
-        import sync
-        self.sync = sync
-        self._orig = (sync.CONFIG, sync.STAMP, sync.LOG, sync.MARKER)
+        import zcp_sync
+        self.zcp_sync = zcp_sync
+        self._orig = (zcp_sync.CONFIG, zcp_sync.STAMP, zcp_sync.LOG, zcp_sync.MARKER)
         self._tmp = tempfile.TemporaryDirectory(prefix="zpatch-stale-", ignore_cleanup_errors=True)
         d = Path(self._tmp.name)
-        sync.CONFIG = d / "config.json"        # 不存在 → 走插件清单默认值（全开）
-        sync.STAMP = d / "_sync.last"
-        sync.LOG = d / "_sync.log"
-        sync.MARKER = d / "_autoinject.done"
+        zcp_sync.CONFIG = d / "config.json"        # 不存在 → 走插件清单默认值（全开）
+        zcp_sync.STAMP = d / "_sync.last"
+        zcp_sync.LOG = d / "_sync.log"
+        zcp_sync.MARKER = d / "_autoinject.done"
 
     def tearDown(self):
-        (self.sync.CONFIG, self.sync.STAMP, self.sync.LOG,
-         self.sync.MARKER) = self._orig
+        (self.zcp_sync.CONFIG, self.zcp_sync.STAMP, self.zcp_sync.LOG,
+         self.zcp_sync.MARKER) = self._orig
         self._tmp.cleanup()
 
     # ---------- check_state 必须把「内容旧」和「已最新」分开 ----------
@@ -2089,7 +2089,7 @@ class TestSyncStaleIsReinjected(unittest.TestCase):
         只要 `if "已打" in out` 排在 `if "含旧版组件" in out` 前面，
         stale 分支就永远走不到 —— 而这正是修复前的状态。
         """
-        sync = self.sync
+        zcp_sync = self.zcp_sync
         samples = {
             "已打（含旧版组件，重跑可自动更新）": "stale",
             "已打": "on",
@@ -2099,19 +2099,19 @@ class TestSyncStaleIsReinjected(unittest.TestCase):
         }
         for text, want in samples.items():
             with self.subTest(text=text):
-                orig_run = sync.subprocess.run
+                orig_run = zcp_sync.subprocess.run
 
                 class _R:
                     returncode = 0
                     stdout = text
                     stderr = ""
 
-                sync.subprocess.run = lambda *a, **k: _R()
+                zcp_sync.subprocess.run = lambda *a, **k: _R()
                 try:
-                    self.assertEqual(sync.check_state(["--enhance-prompt"]), want,
+                    self.assertEqual(zcp_sync.check_state(["--enhance-prompt"]), want,
                                      f"{text!r} 应判为 {want}")
                 finally:
-                    sync.subprocess.run = orig_run
+                    zcp_sync.subprocess.run = orig_run
 
     def test_stale_branch_is_checked_before_generic_da(self):
         """源码层面再钉一次顺序：`含旧版组件` 必须出现在裸 `已打` 之前。
@@ -2121,7 +2121,7 @@ class TestSyncStaleIsReinjected(unittest.TestCase):
         但这条给出的报错更直指根因）。
         """
         import inspect
-        src = inspect.getsource(self.sync.check_state)
+        src = inspect.getsource(self.zcp_sync.check_state)
         self.assertIn("含旧版组件", src)
         i_stale = src.index("含旧版组件")
         # 找裸 "已打" 判断（排除 "未打" 里不含此串、以及 stale 注释里的提及）
@@ -2134,8 +2134,8 @@ class TestSyncStaleIsReinjected(unittest.TestCase):
     def test_stale_repack_patch_is_rescheduled_for_watchdog(self):
         """重打包级补丁（enhance/puller）stale 时必须转交看护，而不是被跳过。"""
         states = {("--enhance-prompt",): "stale"}
-        with patcher_stubbed(self.sync, states=states) as calls:
-            summary = quiet(self.sync.run_sync)
+        with patcher_stubbed(self.zcp_sync, states=states) as calls:
+            summary = quiet(self.zcp_sync.run_sync)
         watchdogs = [c for c in calls if c[0] == "watchdog"]
         self.assertEqual(len(watchdogs), 1, f"必须挂载看护，实际调用：{calls}")
         self.assertTrue(watchdogs[0][1].get("enhance_prompt"),
@@ -2146,8 +2146,8 @@ class TestSyncStaleIsReinjected(unittest.TestCase):
     def test_stale_non_repack_patch_is_applied_immediately(self):
         """非重打包级补丁（usage_chart 等）stale 时应当**当场**重跑。"""
         states = {("--usage-chart",): "stale"}
-        with patcher_stubbed(self.sync, states=states) as calls:
-            summary = quiet(self.sync.run_sync)
+        with patcher_stubbed(self.zcp_sync, states=states) as calls:
+            summary = quiet(self.zcp_sync.run_sync)
         runs = [c for c in calls if c[0] == "run" and c[1] == ("--usage-chart",)]
         self.assertEqual(len(runs), 1, f"应当场重跑一次，实际：{calls}")
         self.assertFalse(runs[0][2], "stale 且 want=True 时不应走还原")
@@ -2157,13 +2157,13 @@ class TestSyncStaleIsReinjected(unittest.TestCase):
         """开关是关的、装的却是旧版 → 直接还原（不必先更新再还原绕一圈）。"""
         states = {("--enhance-prompt",): "stale"}
         # 让 enhance_prompt 的期望值为 False
-        orig_resolve = self.sync.resolve_wanted
-        self.sync.resolve_wanted = lambda: ({"enhance_prompt": False}, "测试")
+        orig_resolve = self.zcp_sync.resolve_wanted
+        self.zcp_sync.resolve_wanted = lambda: ({"enhance_prompt": False}, "测试")
         try:
-            with patcher_stubbed(self.sync, states=states) as calls:
-                quiet(self.sync.run_sync)
+            with patcher_stubbed(self.zcp_sync, states=states) as calls:
+                quiet(self.zcp_sync.run_sync)
         finally:
-            self.sync.resolve_wanted = orig_resolve
+            self.zcp_sync.resolve_wanted = orig_resolve
         runs = [c for c in calls if c[0] == "run" and c[1] == ("--enhance-prompt",)]
         self.assertEqual(len(runs), 1, f"应还原一次，实际：{calls}")
         self.assertTrue(runs[0][2], "want=False 时 revert 必须为 True")
@@ -2171,8 +2171,8 @@ class TestSyncStaleIsReinjected(unittest.TestCase):
     def test_up_to_date_patch_is_left_alone(self):
         """对照组：真正最新的补丁不该被反复重写 —— 否则每次会话启动都重打包 asar。"""
         states = {("--enhance-prompt",): "on", ("--tps-footer",): "on"}
-        with patcher_stubbed(self.sync, states=states) as calls:
-            summary = quiet(self.sync.run_sync)
+        with patcher_stubbed(self.zcp_sync, states=states) as calls:
+            summary = quiet(self.zcp_sync.run_sync)
         self.assertEqual([c for c in calls if c[0] == "run" and
                           c[1] == ("--enhance-prompt",)], [],
                          "已是最新就不该重跑")
@@ -2182,7 +2182,7 @@ class TestSyncStaleIsReinjected(unittest.TestCase):
 class TestRunPatcherVerdict(unittest.TestCase):
     """★ 回归：`run_patcher()` 不能用裸 `[!]` 判失败（0.6.3 修复）。
 
-    `zcode_patcher.py` 有 60+ 处 `[!]` 输出，其中相当一部分出现在**完全成功的路径**上，
+    `zcp_patcher.py` 有 60+ 处 `[!]` 输出，其中相当一部分出现在**完全成功的路径**上，
     只是顺带提示「发现的问题」：
 
       * `发现 N 个模型同时存在于 providerModelRules 与 manualProviderModelRules…
@@ -2197,22 +2197,22 @@ class TestRunPatcherVerdict(unittest.TestCase):
     """
 
     def setUp(self):
-        import sync
-        self.sync = sync
+        import zcp_sync
+        self.zcp_sync = zcp_sync
 
     def _verdict(self, out: str, rc: int = 0) -> str:
-        orig = self.sync.subprocess.run
+        orig = self.zcp_sync.subprocess.run
 
         class _R:
             returncode = rc
             stdout = out
             stderr = ""
 
-        self.sync.subprocess.run = lambda *a, **k: _R()
+        self.zcp_sync.subprocess.run = lambda *a, **k: _R()
         try:
-            return self.sync.run_patcher(["--reasoning-config"], revert=False)
+            return self.zcp_sync.run_patcher(["--reasoning-config"], revert=False)
         finally:
-            self.sync.subprocess.run = orig
+            self.zcp_sync.subprocess.run = orig
 
     _BENIGN = ("    [!] 发现 2 个模型同时存在于 providerModelRules 与 "
                "manualProviderModelRules —— 内核会因此把整份供应商配置降级为空，"
@@ -2264,7 +2264,7 @@ class TestRunPatcherVerdict(unittest.TestCase):
                            ("合计  4  项： 成功  4 ， 失败  0", 0),
                            ("完全不像汇总行", None)):
             with self.subTest(text=text):
-                self.assertEqual(self.sync._summary_failures(text), want)
+                self.assertEqual(self.zcp_sync._summary_failures(text), want)
 
     def test_source_no_longer_uses_bare_bang(self):
         """源码层面钉死：判据里不许再出现裸 `"[!]"`。
@@ -2273,10 +2273,10 @@ class TestRunPatcherVerdict(unittest.TestCase):
         防止有人「顺手」把宽泛判据加回来（加回来后单测会红，但这条报错更直指根因）。
         """
         import inspect
-        src = inspect.getsource(self.sync.run_patcher)
+        src = inspect.getsource(self.zcp_sync.run_patcher)
         self.assertNotIn('"[!]"', src,
                          "run_patcher 的判据里又出现了裸 [!] —— "
-                         "zcode_patcher.py 有 60+ 处 [!]，其中多处在成功路径上")
+                         "zcp_patcher.py 有 60+ 处 [!]，其中多处在成功路径上")
 
 class TestSearchMatchesOnlyOurPlugin(unittest.TestCase):
     """★ 回归：配置树查找必须只认**本插件**的键（0.6.3 修复）。
@@ -2291,15 +2291,15 @@ class TestSearchMatchesOnlyOurPlugin(unittest.TestCase):
     """
 
     def setUp(self):
-        import sync
-        self.sync = sync
+        import zcp_sync
+        self.zcp_sync = zcp_sync
 
     def test_accepts_real_host_key_forms(self):
         for key in ("zcode-pilot@dev-abc123",      # dev 市场
                     "zcode-pilot@zcode-toolkit",   # 本机仓库即市场
                     "zcode-pilot"):                # 无市场后缀
             with self.subTest(key=key):
-                self.assertTrue(self.sync._is_our_key(key), f"{key} 应被接受")
+                self.assertTrue(self.zcp_sync._is_our_key(key), f"{key} 应被接受")
 
     def test_rejects_same_prefix_other_plugins(self):
         """核心回归：同前缀的**别的插件**不能被认领。"""
@@ -2307,7 +2307,7 @@ class TestSearchMatchesOnlyOurPlugin(unittest.TestCase):
                     "zcode-pilot-lite@mkt", "zcode-pilotfoo",
                     "my-zcode-pilot@mkt"):
             with self.subTest(key=key):
-                self.assertFalse(self.sync._is_our_key(key),
+                self.assertFalse(self.zcp_sync._is_our_key(key),
                                  f"{key} 是别的插件/别的位置，不该被认领")
 
     def test_search_picks_our_entry_not_the_same_prefix_one(self):
@@ -2319,7 +2319,7 @@ class TestSearchMatchesOnlyOurPlugin(unittest.TestCase):
             "zcode-pilot-extra@mkt": {"reasoning_config": False, "enhance_prompt": False},
             "zcode-pilot@mkt": {"reasoning_config": True, "enhance_prompt": True},
         }}
-        got = self.sync._search(cfg, "config.json")
+        got = self.zcp_sync._search(cfg, "config.json")
         self.assertIsNotNone(got, "应能找到本插件配置")
         val, path = got
         self.assertEqual(path, "config.json.plugins.zcode-pilot@mkt")
@@ -2328,7 +2328,7 @@ class TestSearchMatchesOnlyOurPlugin(unittest.TestCase):
     def test_search_returns_none_when_only_other_plugins_present(self):
         """只有同前缀的**别的插件**时，不能认领 —— 否则会拿别人的配置去注入。"""
         cfg = {"plugins": {"zcode-pilot-extra@mkt": {"reasoning_config": True}}}
-        self.assertIsNone(self.sync._search(cfg, "config.json"))
+        self.assertIsNone(self.zcp_sync._search(cfg, "config.json"))
 
 
 class TestPluginBoundaryStopsAtPluginRoot(unittest.TestCase):
@@ -2345,12 +2345,12 @@ class TestPluginBoundaryStopsAtPluginRoot(unittest.TestCase):
     """
 
     def setUp(self):
-        import sync
-        self.sync = sync
+        import zcp_sync
+        self.zcp_sync = zcp_sync
 
     def test_boundary_never_includes_filesystem_root(self):
         """盘符根 / 文件系统根绝不能出现在搜索范围内。"""
-        for p in self.sync._plugin_boundary():
+        for p in self.zcp_sync._plugin_boundary():
             self.assertNotEqual(p, p.parent,
                                 f"边界里出现了文件系统根：{p}")
             self.assertTrue(p.is_dir(), f"边界项应是已存在目录：{p}")
@@ -2360,8 +2360,8 @@ class TestPluginBoundaryStopsAtPluginRoot(unittest.TestCase):
 
         它后面的目录（skills/ 的父、盘的父……）都只可能放着无关清单。
         """
-        b = self.sync._plugin_boundary()
-        roots = [p for p in b if (p / "skills" / self.sync.PLUGIN_ID_PREFIX).is_dir()]
+        b = self.zcp_sync._plugin_boundary()
+        roots = [p for p in b if (p / "skills" / self.zcp_sync.PLUGIN_ID_PREFIX).is_dir()]
         self.assertTrue(roots, "应能识别出插件根（含 skills/<插件名>）")
         self.assertIn(roots[0], b, "插件根必须在搜索范围内")
         # 插件根之后不应再有更上层目录
@@ -2370,7 +2370,7 @@ class TestPluginBoundaryStopsAtPluginRoot(unittest.TestCase):
 
     def test_repo_layout_still_finds_defaults(self):
         """对照组：边界收紧后，本仓库仍必须能正常取到默认值（不能修坏）。"""
-        d = self.sync.declared_defaults()
+        d = self.zcp_sync.declared_defaults()
         self.assertTrue(d, "本仓库应能读到插件清单默认值")
         self.assertIn("enhance_prompt", d)
         self.assertTrue(all(isinstance(v, bool) for v in d.values()))
@@ -2387,15 +2387,15 @@ class TestPluginBoundaryStopsAtPluginRoot(unittest.TestCase):
             json.dumps({"name": "some-other-plugin",
                         "userConfig": {"enhance_prompt": {"default": False}}}),
             encoding="utf-8")
-        orig = self.sync.HERE
+        orig = self.zcp_sync.HERE
         # 让脚本目录位于 d/x/y/scripts，使 d 落在向上搜索范围内
         sd = d / "x" / "y" / "scripts"
         sd.mkdir(parents=True)
-        self.sync.HERE = sd
+        self.zcp_sync.HERE = sd
         try:
-            got = self.sync.declared_defaults()
+            got = self.zcp_sync.declared_defaults()
         finally:
-            self.sync.HERE = orig
+            self.zcp_sync.HERE = orig
         self.assertNotIn("enhance_prompt", got,
                          "用了别的插件的清单（name 校验失效）")
 
@@ -2411,8 +2411,8 @@ class TestAutoInject(unittest.TestCase):
     """
 
     def setUp(self):
-        import sync
-        self.sync = sync
+        import zcp_sync
+        self.zcp_sync = zcp_sync
         self._tmp = tempfile.TemporaryDirectory(prefix="zpatch-auto-", ignore_cleanup_errors=True)
         self._d = Path(self._tmp.name)
 
@@ -2421,16 +2421,16 @@ class TestAutoInject(unittest.TestCase):
 
     def _resolve(self, opts, source, defaults):
         """在受控输入下跑 resolve_wanted()。"""
-        orig = (self.sync.read_options, self.sync.declared_defaults)
-        self.sync.read_options = lambda: (opts, source)
-        self.sync.declared_defaults = lambda: defaults
+        orig = (self.zcp_sync.read_options, self.zcp_sync.declared_defaults)
+        self.zcp_sync.read_options = lambda: (opts, source)
+        self.zcp_sync.declared_defaults = lambda: defaults
         try:
-            return self.sync.resolve_wanted()
+            return self.zcp_sync.resolve_wanted()
         finally:
-            self.sync.read_options, self.sync.declared_defaults = orig
+            self.zcp_sync.read_options, self.zcp_sync.declared_defaults = orig
 
     def _switch_keys(self):
-        return {key for key, _args, _repack in self.sync.PATCHES}
+        return {key for key, _args, _repack in self.zcp_sync.PATCHES}
 
     # ---------------------------------------------------------------- 清单契约
 
@@ -2445,12 +2445,12 @@ class TestAutoInject(unittest.TestCase):
                               .read_text(encoding="utf-8"))
         uc = manifest.get("userConfig") or {}
         self.assertEqual(set(uc), self._switch_keys(),
-                         "plugin.json 的 userConfig 必须与 sync.PATCHES 一一对应")
+                         "plugin.json 的 userConfig 必须与 zcp_sync.PATCHES 一一对应")
         off = sorted(k for k, v in uc.items() if v.get("default") is not True)
         self.assertEqual(off, [], f"这些开关的 default 不是 true，装完不会自动生效: {off}")
 
     def test_declared_defaults_reads_the_real_manifest(self):
-        got = self.sync.declared_defaults()
+        got = self.zcp_sync.declared_defaults()
         self.assertEqual(set(got), self._switch_keys())
         self.assertTrue(all(got.values()), f"默认值应全为 true，实际 {got}")
 
@@ -2466,22 +2466,22 @@ class TestAutoInject(unittest.TestCase):
         }), encoding="utf-8")
         scripts = root / "skills" / "zcode-pilot" / "scripts"
         scripts.mkdir(parents=True)
-        orig = self.sync.HERE
-        self.sync.HERE = scripts
+        orig = self.zcp_sync.HERE
+        self.zcp_sync.HERE = scripts
         try:
-            self.assertEqual(self.sync.declared_defaults(), {"a": True, "c": False})
+            self.assertEqual(self.zcp_sync.declared_defaults(), {"a": True, "c": False})
         finally:
-            self.sync.HERE = orig
+            self.zcp_sync.HERE = orig
 
     def test_declared_defaults_without_manifest_is_empty(self):
         scripts = self._d / "lonely" / "skills" / "zcode-pilot" / "scripts"
         scripts.mkdir(parents=True)
-        orig = self.sync.HERE
-        self.sync.HERE = scripts
+        orig = self.zcp_sync.HERE
+        self.zcp_sync.HERE = scripts
         try:
-            self.assertEqual(self.sync.declared_defaults(), {})
+            self.assertEqual(self.zcp_sync.declared_defaults(), {})
         finally:
-            self.sync.HERE = orig
+            self.zcp_sync.HERE = orig
 
     # ------------------------------------------------------------ 合并优先级
 
@@ -2524,38 +2524,38 @@ class TestAutoInject(unittest.TestCase):
                  "[!] 未打": "off", "已打": "on", "看不懂的输出": "unknown"}
         for text, want in cases.items():
             with self.subTest(text=text):
-                orig = self.sync.subprocess.run
-                self.sync.subprocess.run = lambda *a, **k: subprocess.CompletedProcess(
+                orig = self.zcp_sync.subprocess.run
+                self.zcp_sync.subprocess.run = lambda *a, **k: subprocess.CompletedProcess(
                     [], 0, stdout=text, stderr="")
                 try:
-                    self.assertEqual(self.sync.check_state([]), want)
+                    self.assertEqual(self.zcp_sync.check_state([]), want)
                 finally:
-                    self.sync.subprocess.run = orig
+                    self.zcp_sync.subprocess.run = orig
 
     def test_run_sync_skips_switches_that_do_not_apply(self):
         """na 的开关既不执行也不报错，只在结论里注明「本版本不适用」。"""
-        orig = (self.sync.read_options, self.sync.declared_defaults)
-        self.sync.read_options = lambda: ({"core_patch": True}, "config")
-        self.sync.declared_defaults = lambda: {}
+        orig = (self.zcp_sync.read_options, self.zcp_sync.declared_defaults)
+        self.zcp_sync.read_options = lambda: ({"core_patch": True}, "config")
+        self.zcp_sync.declared_defaults = lambda: {}
         try:
-            with patcher_stubbed(self.sync, {(): "na"}) as calls:
-                summary = self.sync.run_sync(echo=False)
+            with patcher_stubbed(self.zcp_sync, {(): "na"}) as calls:
+                summary = self.zcp_sync.run_sync(echo=False)
         finally:
-            self.sync.read_options, self.sync.declared_defaults = orig
+            self.zcp_sync.read_options, self.zcp_sync.declared_defaults = orig
         self.assertEqual(calls, [], "不适用的补丁不应被执行")
         self.assertIn("本版本不适用", summary)
         self.assertNotIn("已写入", summary)
 
     def test_na_is_skipped_even_when_user_asked_for_it(self):
         """用户显式打开也不该去跑不适用的补丁——照样只标注、不执行。"""
-        orig = (self.sync.read_options, self.sync.declared_defaults)
-        self.sync.read_options = lambda: ({"core_patch": False}, "config")
-        self.sync.declared_defaults = lambda: {}
+        orig = (self.zcp_sync.read_options, self.zcp_sync.declared_defaults)
+        self.zcp_sync.read_options = lambda: ({"core_patch": False}, "config")
+        self.zcp_sync.declared_defaults = lambda: {}
         try:
-            with patcher_stubbed(self.sync, {(): "na"}) as calls:
-                summary = self.sync.run_sync(echo=False)
+            with patcher_stubbed(self.zcp_sync, {(): "na"}) as calls:
+                summary = self.zcp_sync.run_sync(echo=False)
         finally:
-            self.sync.read_options, self.sync.declared_defaults = orig
+            self.zcp_sync.read_options, self.zcp_sync.declared_defaults = orig
         self.assertEqual(calls, [])
         self.assertIn("本版本不适用", summary)
 
@@ -2563,26 +2563,26 @@ class TestAutoInject(unittest.TestCase):
 
     def _resolve_only(self, opts):
         """把 read_options / declared_defaults 固定住，只观察 run_sync 的动作。"""
-        orig = (self.sync.read_options, self.sync.declared_defaults)
-        self.sync.read_options = lambda: (opts, "config")
-        self.sync.declared_defaults = lambda: {}
+        orig = (self.zcp_sync.read_options, self.zcp_sync.declared_defaults)
+        self.zcp_sync.read_options = lambda: (opts, "config")
+        self.zcp_sync.declared_defaults = lambda: {}
         return orig
 
     def test_refused_write_is_deferred_not_reported_as_failure(self):
-        """客户端在运行 → zcode_patcher.py 直接拒绝写入（exit 2）。
+        """客户端在运行 → zcp_patcher.py 直接拒绝写入（exit 2）。
 
-        这不是失败，而是「现在不能写，等退出后写」：必须转交 apply_after_exit.py。
+        这不是失败，而是「现在不能写，等退出后写」：必须转交 zcp_watchdog.py。
         否则用户看到的就是「未处理: xxx(执行失败)」而**永远不生效** ——
         SessionStart 钩子必然在 ZCode 运行中触发，所以这条路是常态而非例外。
         """
         orig = self._resolve_only({"reasoning_config": True})
         try:
-            with patcher_stubbed(self.sync,
+            with patcher_stubbed(self.zcp_sync,
                                  {("--reasoning-config",): "off"},
                                  {("--reasoning-config",): "refused"}) as calls:
-                summary = self.sync.run_sync(echo=False)
+                summary = self.zcp_sync.run_sync(echo=False)
         finally:
-            self.sync.read_options, self.sync.declared_defaults = orig
+            self.zcp_sync.read_options, self.zcp_sync.declared_defaults = orig
         self.assertEqual(calls, [("run", ("--reasoning-config",), False),
                                  ("watchdog", {"reasoning_config": True})])
         self.assertNotIn("未处理", summary)
@@ -2592,12 +2592,12 @@ class TestAutoInject(unittest.TestCase):
         """真正的失败（锚点不匹配等）不能被「被拒」这条新分支吞掉。"""
         orig = self._resolve_only({"reasoning_config": True})
         try:
-            with patcher_stubbed(self.sync,
+            with patcher_stubbed(self.zcp_sync,
                                  {("--reasoning-config",): "off"},
                                  {("--reasoning-config",): "fail"}) as calls:
-                summary = self.sync.run_sync(echo=False)
+                summary = self.zcp_sync.run_sync(echo=False)
         finally:
-            self.sync.read_options, self.sync.declared_defaults = orig
+            self.zcp_sync.read_options, self.zcp_sync.declared_defaults = orig
         self.assertIn("未处理", summary)
         self.assertEqual([c[0] for c in calls], ["run"], "失败不该起看护")
 
@@ -2612,19 +2612,19 @@ class TestAutoInject(unittest.TestCase):
         env = {"ZCODE_PLUGIN_CONFIG_REASONING_CONFIG": "false",
                "ZCODE_PLUGIN_CONFIG_USAGE_CHART": "true"}
         with mock.patch.dict("os.environ", env, clear=False):
-            opts, source = self.sync.read_options()
+            opts, source = self.zcp_sync.read_options()
         self.assertEqual(source, "env")
         self.assertEqual(opts, {"reasoning_config": False, "usage_chart": True})
 
     def test_watchdog_knows_every_switch(self):
-        """apply_after_exit 的参数表必须覆盖 sync.PATCHES 的每一个键。
+        """zcp_watchdog 的参数表必须覆盖 zcp_sync.PATCHES 的每一个键。
 
         漏一个键的后果：`--want=<键>=on` 被 parse_wants 当「未知开关」忽略，
         那个开关**开不起来也关不干净**（enhance_prompt 就漏过这一条）。
         """
-        import apply_after_exit as aae
-        self.assertEqual({k for k, _a, _r in self.sync.PATCHES} - set(aae.PATCH_ARGS),
-                         set(), "apply_after_exit.PATCH_ARGS 漏了开关，退出后看护会静默忽略它")
+        import zcp_watchdog as aae
+        self.assertEqual({k for k, _a, _r in self.zcp_sync.PATCHES} - set(aae.PATCH_ARGS),
+                         set(), "zcp_watchdog.PATCH_ARGS 漏了开关，退出后看护会静默忽略它")
 
     def test_legacy_slider_residue_is_scheduled_for_cleanup(self):
         """老用户客户端里可能还留着已移除的「思考强度滑条」注入。
@@ -2634,10 +2634,10 @@ class TestAutoInject(unittest.TestCase):
         """
         orig = self._resolve_only({})
         try:
-            with patcher_stubbed(self.sync, legacy=True) as calls:
-                summary = self.sync.run_sync(echo=False)
+            with patcher_stubbed(self.zcp_sync, legacy=True) as calls:
+                summary = self.zcp_sync.run_sync(echo=False)
         finally:
-            self.sync.read_options, self.sync.declared_defaults = orig
+            self.zcp_sync.read_options, self.zcp_sync.declared_defaults = orig
         self.assertIn(("watchdog", {"cleanup_legacy": True}), calls)
         self.assertIn("清理历史「思考强度滑条」残留", summary)
 
@@ -2645,16 +2645,16 @@ class TestAutoInject(unittest.TestCase):
         """没有残留时绝不能凭空排一个看护任务——那会平白多一次「等退出 + 重启客户端」。"""
         orig = self._resolve_only({})
         try:
-            with patcher_stubbed(self.sync, legacy=False) as calls:
-                summary = self.sync.run_sync(echo=False)
+            with patcher_stubbed(self.zcp_sync, legacy=False) as calls:
+                summary = self.zcp_sync.run_sync(echo=False)
         finally:
-            self.sync.read_options, self.sync.declared_defaults = orig
+            self.zcp_sync.read_options, self.zcp_sync.declared_defaults = orig
         self.assertEqual(calls, [])
         self.assertNotIn("清理历史", summary)
 
     def test_watchdog_batch_tasks_merges_repack_invocations(self):
         """看护必须将同方向的补丁参数合并为批量调用，避免多次解包/重打包 asar 导致 20s+ 耗时。"""
-        import apply_after_exit as aae
+        import zcp_watchdog as aae
 
         # ① 全量默认任务（重打包级补丁全部应用）应合并为 1 次批量调用
         default_tasks = [(args, False) for args in aae.DEFAULT_TASKS]
@@ -2699,20 +2699,20 @@ class TestAutoInject(unittest.TestCase):
         """
         orig = self._resolve_only({"reasoning_config": False})
         try:
-            with patcher_stubbed(self.sync,
+            with patcher_stubbed(self.zcp_sync,
                                  {("--reasoning-config",): "on"},
                                  {("--reasoning-config",): "ok"}) as calls:
-                summary = self.sync.run_sync(echo=False)
+                summary = self.zcp_sync.run_sync(echo=False)
         finally:
-            self.sync.read_options, self.sync.declared_defaults = orig
+            self.zcp_sync.read_options, self.zcp_sync.declared_defaults = orig
         self.assertEqual(calls, [], "关闭 reasoning_config 时应完全跳过，不得调用 patcher 或看护")
         self.assertNotIn("已写入", summary)
         self.assertNotIn("ZCode 退出时写入", summary)
         self.assertNotIn("未处理", summary)
 
-    def test_apply_after_exit_ignores_reasoning_config_off_and_does_not_restart(self):
+    def test_zcp_watchdog_ignores_reasoning_config_off_and_does_not_restart(self):
         """Issue #5：看护进程收到 reasoning_config=off 时绝不执行 revert，无任务时直接退出。"""
-        import apply_after_exit as aae
+        import zcp_watchdog as aae
         orig_want = aae.WANT_FILE
         fake_want = self._d / "_fake_watchdog.want"
         aae.WANT_FILE = fake_want
@@ -2765,103 +2765,103 @@ class TestAutoInject(unittest.TestCase):
         """
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            self.sync.emit_notice()
+            self.zcp_sync.emit_notice()
         raw = buf.getvalue()
         self.assertTrue(raw.startswith("{"), f"必须以 {{ 开头才会被解析: {raw[:40]!r}")
         data = json.loads(raw)
         self.assertEqual(list(data), ["additionalContext"], "只允许这一个字段")
         self.assertIsInstance(data["additionalContext"], str)
-        self.assertIn(self.sync.NOTICE_HEAD, data["additionalContext"])
+        self.assertIn(self.zcp_sync.NOTICE_HEAD, data["additionalContext"])
 
     def test_notice_explains_the_exit_requirement(self):
         """提示要讲清「八项都要完全退出 ZCode 才写入」——否则用户会以为没生效。"""
-        notice = self.sync.build_notice()
+        notice = self.zcp_sync.build_notice()
         self.assertIn("完全退出 ZCode", notice)
         self.assertIn("自动把 ZCode 重新拉起", notice)
-        self.assertIn("doctor.py", notice)
+        self.assertIn("zcp_doctor.py", notice)
 
     def test_first_auto_inject_fires_exactly_once(self):
         """提示只出一次，之后每次开会话都弹就成了噪声。"""
-        orig = self.sync.MARKER
-        self.sync.MARKER = self._d / "_autoinject.done"
+        orig = self.zcp_sync.MARKER
+        self.zcp_sync.MARKER = self._d / "_autoinject.done"
         try:
-            self.assertTrue(self.sync.first_auto_inject())
-            self.assertFalse(self.sync.first_auto_inject())
-            self.assertTrue(self.sync.MARKER.exists())
+            self.assertTrue(self.zcp_sync.first_auto_inject())
+            self.assertFalse(self.zcp_sync.first_auto_inject())
+            self.assertTrue(self.zcp_sync.MARKER.exists())
         finally:
-            self.sync.MARKER = orig
+            self.zcp_sync.MARKER = orig
 
     def test_first_auto_inject_survives_unwritable_marker(self):
         """标记写不进去（只读安装目录）时不能抛异常，也不能每次都当首次而反复提示。"""
-        orig = self.sync.MARKER
-        self.sync.MARKER = self._d / "nope" / "x" / "_autoinject.done"
+        orig = self.zcp_sync.MARKER
+        self.zcp_sync.MARKER = self._d / "nope" / "x" / "_autoinject.done"
         try:
-            self.assertFalse(self.sync.first_auto_inject())
+            self.assertFalse(self.zcp_sync.first_auto_inject())
         finally:
-            self.sync.MARKER = orig
+            self.zcp_sync.MARKER = orig
 
     def test_detach_emits_notice_only_on_the_first_session(self):
         """整条钩子链路：第一次开会话出提示，第二次安静。"""
-        import sync
-        orig = (sync.CONFIG, sync.STAMP, sync.LOG, sync.MARKER, sync.spawn_detached,
+        import zcp_sync
+        orig = (zcp_sync.CONFIG, zcp_sync.STAMP, zcp_sync.LOG, zcp_sync.MARKER, zcp_sync.spawn_detached,
                 list(sys.argv))
         d = self._d / "hook"
         d.mkdir()
-        sync.CONFIG = d / "config.json"
-        sync.STAMP = d / "_sync.last"
-        sync.LOG = d / "_sync.log"
-        sync.MARKER = d / "_autoinject.done"
-        sync.spawn_detached = lambda extra: True
+        zcp_sync.CONFIG = d / "config.json"
+        zcp_sync.STAMP = d / "_sync.last"
+        zcp_sync.LOG = d / "_sync.log"
+        zcp_sync.MARKER = d / "_autoinject.done"
+        zcp_sync.spawn_detached = lambda extra: True
         try:
             outs = []
-            with patcher_stubbed(sync):
+            with patcher_stubbed(zcp_sync):
                 for _ in range(2):
-                    sys.argv[:] = ["sync.py", "--detach"]
+                    sys.argv[:] = ["zcp_sync.py", "--detach"]
                     buf = io.StringIO()
                     with contextlib.redirect_stdout(buf):
-                        sync.main()
+                        zcp_sync.main()
                     outs.append(buf.getvalue())
             self.assertTrue(outs[0].startswith("{"), "首次必须给出提示")
             self.assertEqual(outs[1], "", "第二次不该再提示")
         finally:
-            (sync.CONFIG, sync.STAMP, sync.LOG, sync.MARKER,
-             sync.spawn_detached) = orig[:5]
+            (zcp_sync.CONFIG, zcp_sync.STAMP, zcp_sync.LOG, zcp_sync.MARKER,
+             zcp_sync.spawn_detached) = orig[:5]
             sys.argv[:] = orig[5]
 
     def test_client_upgrade_detection_triggers_notice_again(self):
         """客户端升级后（版本/指纹改变），必须重置标记并重新发出升级说明。"""
-        import sync
-        orig = (sync.CLIENT_FINGERPRINT, sync.MARKER, sync.get_client_fingerprint)
+        import zcp_sync
+        orig = (zcp_sync.CLIENT_FINGERPRINT, zcp_sync.MARKER, zcp_sync.get_client_fingerprint)
         d = self._d / "upgrade_test"
         d.mkdir(parents=True, exist_ok=True)
-        sync.CLIENT_FINGERPRINT = d / "_client_fingerprint.json"
-        sync.MARKER = d / "_autoinject.done"
+        zcp_sync.CLIENT_FINGERPRINT = d / "_client_fingerprint.json"
+        zcp_sync.MARKER = d / "_autoinject.done"
 
         # 模拟旧版客户端
-        sync.CLIENT_FINGERPRINT.write_text(
+        zcp_sync.CLIENT_FINGERPRINT.write_text(
             json.dumps({"asar_path": "dummy", "version": "3.14.1", "size": 100, "mtime": 100}),
             encoding="utf-8"
         )
-        sync.MARKER.write_text("2026-09-01", encoding="utf-8")
+        zcp_sync.MARKER.write_text("2026-09-01", encoding="utf-8")
 
         # 客户端升级至 3.14.5
-        sync.get_client_fingerprint = lambda: {
+        zcp_sync.get_client_fingerprint = lambda: {
             "asar_path": "dummy", "version": "3.14.5", "size": 120, "mtime": 200
         }
         try:
-            should_notify, is_upgrade, ver = sync.detect_upgrade_or_first_run()
+            should_notify, is_upgrade, ver = zcp_sync.detect_upgrade_or_first_run()
             self.assertTrue(should_notify)
             self.assertTrue(is_upgrade)
             self.assertEqual(ver, "3.14.5")
-            notice = sync.build_notice(is_upgrade=True, version="3.14.5")
+            notice = zcp_sync.build_notice(is_upgrade=True, version="3.14.5")
             self.assertIn("升级", notice)
             self.assertIn("3.14.5", notice)
         finally:
-            sync.CLIENT_FINGERPRINT, sync.MARKER, sync.get_client_fingerprint = orig
+            zcp_sync.CLIENT_FINGERPRINT, zcp_sync.MARKER, zcp_sync.get_client_fingerprint = orig
 
 
 class TestDoctorDiscovery(unittest.TestCase):
-    """doctor 必须能认出「插件根 = 市场根」这种安装（marketplace.json 里 `source: "./"`）。
+    """zcp_doctor 必须能认出「插件根 = 市场根」这种安装（marketplace.json 里 `source: "./"`）。
 
     最初的实现只找 `<市场>/<插件名>/` 子目录——本地 directory 来源的市场恰好长这样，
     所以在本机"看起来是对的"；但 GitHub 来源的市场是把仓库整个 clone 下来，插件根就是
@@ -2869,13 +2869,13 @@ class TestDoctorDiscovery(unittest.TestCase):
     """
 
     def _with_storage(self, storage: Path):
-        import doctor
-        orig = doctor._storage_roots
-        doctor._storage_roots = lambda: [storage]
+        import zcp_doctor
+        orig = zcp_doctor._storage_roots
+        zcp_doctor._storage_roots = lambda: [storage]
         try:
-            return doctor._installed_plugin_dirs()
+            return zcp_doctor._installed_plugin_dirs()
         finally:
-            doctor._storage_roots = orig
+            zcp_doctor._storage_roots = orig
 
     def _make_plugin(self, root: Path, version: str = "9.9.9") -> None:
         (root / ".zcode-plugin").mkdir(parents=True, exist_ok=True)
@@ -2910,15 +2910,15 @@ class TestDoctorDiscovery(unittest.TestCase):
             storage = Path(d)
             root = storage / "cli" / "plugins" / "marketplaces" / "m"
             self._make_plugin(root, "1.2.3")
-            import doctor
-            self.assertEqual(doctor._manifest_version(root), "1.2.3")
+            import zcp_doctor
+            self.assertEqual(zcp_doctor._manifest_version(root), "1.2.3")
 
     def test_finds_plugin_in_cache_version_dir(self):
         """用户机器上的真实落点：GitHub 来源的市场被缓存成
         `cache/<市场名>/<插件名>/<版本>/` —— 插件根在**版本目录**里。
 
         实测本机 `cache/zcode-plugins-official/computer-use/0.5.13/.zcode-plugin/plugin.json`。
-        用户从 `cache/zcode-toolkit` 敲 `python skills/.../doctor.py` 报 No such file，
+        用户从 `cache/zcode-toolkit` 敲 `python skills/.../zcp_doctor.py` 报 No such file，
         就是因为那一层是**市场目录**，根本没有 skills/。
         """
         with tempfile.TemporaryDirectory() as d:
@@ -2938,7 +2938,7 @@ class TestDoctorDiscovery(unittest.TestCase):
 
     def test_multiple_cached_versions_all_found(self):
         """缓存里会堆积多个版本（本机实测 4 个 zcode-patcher），要全都报出来。"""
-        import doctor
+        import zcp_doctor
         with tempfile.TemporaryDirectory() as d:
             storage = Path(d)
             base = storage / "cli" / "plugins" / "cache" / "m" / "zcode-pilot"
@@ -2946,20 +2946,20 @@ class TestDoctorDiscovery(unittest.TestCase):
                 self._make_plugin(base / v, v)
             found = self._with_storage(storage)
             self.assertEqual(len(found), 2)
-            self.assertEqual(sorted(doctor._manifest_version(p) for p in found),
+            self.assertEqual(sorted(zcp_doctor._manifest_version(p) for p in found),
                              ["0.5.1", "0.5.2"])
 
     def _capture_where(self, storage: Path, verbose: bool = False) -> str:
         """跑一次 --where 并把它打印的内容抓回来。"""
-        import doctor
-        orig = doctor._storage_roots
-        doctor._storage_roots = lambda: [storage]
+        import zcp_doctor
+        orig = zcp_doctor._storage_roots
+        zcp_doctor._storage_roots = lambda: [storage]
         buf = io.StringIO()
         try:
             with contextlib.redirect_stdout(buf):
-                rc = doctor.print_where(verbose=verbose)
+                rc = zcp_doctor.print_where(verbose=verbose)
         finally:
-            doctor._storage_roots = orig
+            zcp_doctor._storage_roots = orig
         self.assertEqual(rc, 0)
         return buf.getvalue()
 
@@ -2984,7 +2984,7 @@ class TestDoctorDiscovery(unittest.TestCase):
             out = self._capture_where(storage)
             self.assertIn(str(root), out)
             self.assertIn("0.5.2", out)
-            self.assertIn("doctor.py", out)          # 给出了可直接复制的命令
+            self.assertIn("zcp_doctor.py", out)          # 给出了可直接复制的命令
             self.assertIn(str(Path("skills") / "zcode-pilot" / "scripts"), out)
             self.assertNotIn("browser-use", out)     # 默认不列别人的插件
             self.assertIn("--where-all", out)        # 想看全量时告诉用户怎么开
@@ -3009,11 +3009,11 @@ class TestDoctorDiscovery(unittest.TestCase):
     def test_where_flag_is_wired_into_cli(self):
         """--where 必须真能从命令行跑通（check_plugin 的提示里已经写了它）。
 
-        子进程显式带 PYTHONIOENCODING=utf-8：这跟 run.cmd / run.sh 的约定一致 ——
+        子进程显式带 PYTHONIOENCODING=utf-8：这跟 zcp-run.cmd / zcp-run.sh 的约定一致 ——
         输出走管道时若留给 cp936，中文会被编码成系统代码页，而这里按 UTF-8 解码。
         """
-        import doctor
-        r = subprocess.run([sys.executable, str(doctor.__file__), "--where"],
+        import zcp_doctor
+        r = subprocess.run([sys.executable, str(zcp_doctor.__file__), "--where"],
                            capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=120,
                            env=dict(os.environ, PYTHONIOENCODING="utf-8"))
@@ -3026,40 +3026,40 @@ class TestConsoleEncoding(unittest.TestCase):
     `subprocess.run(capture_output=True)`）Python 不再走 WriteConsoleW，而是按 cp936 编码 ——
     这时 print 一个 GBK 里没有的字符会抛 UnicodeEncodeError，**把整段输出打断**。
 
-    真实故障：doctor.py 捕获 zcode_patcher.py 的输出，汇总表在
+    真实故障：zcp_doctor.py 捕获 zcp_patcher.py 的输出，汇总表在
     `✓ 用量页去截断补丁` 那一行崩掉，用户只看到半张表 + traceback，
     还以为是补丁本身失败。交互式控制台不受影响，所以这个坑**只在管道里露头**，
     平时手动跑脚本永远测不出来。
     """
 
     def test_marks_are_printable_in_the_current_stdout_encoding(self):
-        import _console
+        import zcp_console
         enc = getattr(sys.stdout, "encoding", None) or "ascii"
-        for mark in (_console.ok_mark(), _console.bad_mark(), _console.warn_mark()):
+        for mark in (zcp_console.ok_mark(), zcp_console.bad_mark(), zcp_console.warn_mark()):
             mark.encode(enc)      # 编不出来就会抛 UnicodeEncodeError
 
     def test_glyph_falls_back_when_encoding_cannot_represent_it(self):
-        import _console
+        import zcp_console
         buf = io.BytesIO()
         orig = sys.stdout
         sys.stdout = io.TextIOWrapper(buf, encoding="cp936", errors="strict")
         try:
-            self.assertEqual(_console.glyph("✓", "v"), "v")
-            self.assertEqual(_console.glyph("✗", "x"), "x")
-            self.assertEqual(_console.glyph("⚠", "!"), "!")
-            self.assertEqual(_console.glyph("✓"), "v")          # 走内置备选表
-            self.assertEqual(_console.glyph("→", "->"), "→")     # cp936 里有 →，不该降级
+            self.assertEqual(zcp_console.glyph("✓", "v"), "v")
+            self.assertEqual(zcp_console.glyph("✗", "x"), "x")
+            self.assertEqual(zcp_console.glyph("⚠", "!"), "!")
+            self.assertEqual(zcp_console.glyph("✓"), "v")          # 走内置备选表
+            self.assertEqual(zcp_console.glyph("→", "->"), "→")     # cp936 里有 →，不该降级
         finally:
             sys.stdout = orig
 
     def test_safe_stdio_replaces_instead_of_crashing(self):
         """errors=replace 是最后一道防线：任何编不出的字符都降级，绝不抛异常。"""
-        import _console
+        import zcp_console
         buf = io.BytesIO()
         orig = sys.stdout
         sys.stdout = io.TextIOWrapper(buf, encoding="cp936", errors="strict")
         try:
-            _console.safe_stdio()
+            zcp_console.safe_stdio()
             self.assertEqual(sys.stdout.errors, "replace")
             print("✓✗⚠ 混在中文里也不该崩")
             sys.stdout.flush()
@@ -3069,14 +3069,14 @@ class TestConsoleEncoding(unittest.TestCase):
         self.assertIn("不该崩".encode("cp936"), raw)
 
     def test_safe_stdio_is_idempotent(self):
-        import _console
-        _console.safe_stdio()
-        _console.safe_stdio()     # 重复调用不该抛（reconfigure 有状态）
+        import zcp_console
+        zcp_console.safe_stdio()
+        zcp_console.safe_stdio()     # 重复调用不该抛（reconfigure 有状态）
 
     def test_patcher_summary_survives_a_cp936_pipe(self):
         """端到端回归：把子进程 stdout 强制成 cp936，汇总表必须完整打出来。
 
-        这正是用户报的那次故障 —— 没有 _console 的话，这一行会抛
+        这正是用户报的那次故障 —— 没有 zcp_console 的话，这一行会抛
         `UnicodeEncodeError: 'gbk' codec can't encode character '\\u2713'`。
         """
         try:
@@ -3099,7 +3099,7 @@ class TestConsoleEncoding(unittest.TestCase):
 
 
 class TestZcodeLogScan(unittest.TestCase):
-    """doctor 会读 ZCode 自己的 jsonl 日志 —— 那里有比心跳文件更靠前的一层证据：
+    """zcp_doctor 会读 ZCode 自己的 jsonl 日志 —— 那里有比心跳文件更靠前的一层证据：
     `bootstrap.app.startup.plugins.completed` 的 `hookCount`（这次启动注册了几个钩子）。
 
     用户实测的那份报告里，心跳为空、补丁全未打，结论只能说「钩子从未运行过」，
@@ -3130,11 +3130,11 @@ class TestZcodeLogScan(unittest.TestCase):
         return [p]
 
     def test_scan_reads_hook_count_and_phase_count(self):
-        import doctor
+        import zcp_doctor
         with tempfile.TemporaryDirectory() as d:
             files = self._write_log(Path(d), [("2026-09-22T01:00:00.000Z", 0, 11, 0),
                                               ("2026-09-22T02:00:00.000Z", 1, 12, 0)])
-            data = doctor._scan_zcode_log(files)
+            data = zcp_doctor._scan_zcode_log(files)
         self.assertEqual(len(data["startups"]), 2)
         self.assertEqual(data["startups"][-1]["hooks"], 1)
         self.assertEqual(data["startups"][-1]["enabled"], 12)
@@ -3143,67 +3143,67 @@ class TestZcodeLogScan(unittest.TestCase):
 
     def test_scan_survives_garbage_lines(self):
         """日志是逐行追加的，写到一半被截断很正常，不能因此让自检崩掉。"""
-        import doctor
+        import zcp_doctor
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "zcode-2026-09-22.jsonl"
             p.write_text('{"hookCount" 这不是 json\n随机一行\n', encoding="utf-8")
-            data = doctor._scan_zcode_log([p])
+            data = zcp_doctor._scan_zcode_log([p])
         self.assertEqual(data["startups"], [])
         self.assertEqual(data["phase_count"], 0)
 
     def test_report_flags_zero_hooks_as_the_cause(self):
         """hookCount=0 时要直接点明「必然结果」，而不是甩一张四选一清单。"""
-        import doctor
+        import zcp_doctor
         with tempfile.TemporaryDirectory() as d:
             files = self._write_log(Path(d), [("2026-09-22T02:00:00.000Z", 0, 11, 0)])
-            orig = doctor._latest_zcode_logs
-            doctor._latest_zcode_logs = lambda *a, **kw: files
+            orig = zcp_doctor._latest_zcode_logs
+            zcp_doctor._latest_zcode_logs = lambda *a, **kw: files
             buf = io.StringIO()
             try:
                 with contextlib.redirect_stdout(buf):
-                    data = doctor.report_zcode_log()
+                    data = zcp_doctor.report_zcode_log()
             finally:
-                doctor._latest_zcode_logs = orig
+                zcp_doctor._latest_zcode_logs = orig
         out = buf.getvalue()
         self.assertIn("0 个钩子", out)
         self.assertIn("不是钩子本身", out)
         self.assertEqual(data["startups"][-1]["hooks"], 0)
 
     def test_report_says_plugin_side_is_ready_when_hooks_registered(self):
-        import doctor
+        import zcp_doctor
         with tempfile.TemporaryDirectory() as d:
             files = self._write_log(Path(d), [("2026-09-22T02:00:00.000Z", 2, 12, 0)])
-            orig = doctor._latest_zcode_logs
-            doctor._latest_zcode_logs = lambda *a, **kw: files
+            orig = zcp_doctor._latest_zcode_logs
+            zcp_doctor._latest_zcode_logs = lambda *a, **kw: files
             buf = io.StringIO()
             try:
                 with contextlib.redirect_stdout(buf):
-                    doctor.report_zcode_log()
+                    zcp_doctor.report_zcode_log()
             finally:
-                doctor._latest_zcode_logs = orig
+                zcp_doctor._latest_zcode_logs = orig
         out = buf.getvalue()
         self.assertIn("已经就绪", out)
         self.assertIn("CLAUDE_PLUGIN_ROOT", out)     # 注册了但没执行 → 才轮到查这个
 
     def test_verdict_uses_log_evidence_when_hook_never_ran(self):
-        import doctor
+        import zcp_doctor
         log_info = {"startups": [{"ts": "2026-09-22 02:00:00", "kind": "zcode_app",
                                   "plugins": 14, "enabled": 11, "hooks": 0,
                                   "diagnostics": 0}],
                     "phase_count": 3, "last_phase": ""}
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            doctor.verdict(True, True, True, True, True, True, False, log_info)
+            zcp_doctor.verdict(True, True, True, True, True, True, False, log_info)
         out = buf.getvalue()
         self.assertIn("注册的钩子数是 0", out)
         self.assertIn("完全退出", out)
 
     def test_verdict_falls_back_to_checklist_without_log(self):
         """读不到日志（旧版 ZCode / 日志被清过）时仍要给四选一清单。"""
-        import doctor
+        import zcp_doctor
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            doctor.verdict(True, True, True, True, True, True, False, None)
+            zcp_doctor.verdict(True, True, True, True, True, True, False, None)
         out = buf.getvalue()
         self.assertIn("依次确认", out)
 
@@ -3218,32 +3218,32 @@ class TestDoctorAutoInjectWording(unittest.TestCase):
     """
 
     def _options(self, saved):
-        import doctor
-        orig = doctor._saved_options
-        doctor._saved_options = lambda: saved
+        import zcp_doctor
+        orig = zcp_doctor._saved_options
+        zcp_doctor._saved_options = lambda: saved
         return orig
 
     def test_check_options_does_not_call_missing_config_a_fault(self):
-        import doctor
+        import zcp_doctor
         orig = self._options({})
         buf = io.StringIO()
         try:
             with contextlib.redirect_stdout(buf):
-                ok = doctor.check_options()
+                ok = zcp_doctor.check_options()
         finally:
-            doctor._saved_options = orig
+            zcp_doctor._saved_options = orig
         out = buf.getvalue()
         self.assertFalse(ok, "返回值仍表示「没有保存过的开关」")
         self.assertIn("这不是故障", out)
         self.assertIn("默认值", out)
-        self.assertNotIn(doctor.BAD, out, "不该再用 ✗ 把它标成故障")
+        self.assertNotIn(zcp_doctor.BAD, out, "不该再用 ✗ 把它标成故障")
 
     def test_verdict_does_not_block_when_nothing_was_ever_saved(self):
         """saved=False + 钩子跑过 → 链路是完整的，不能停在这里。"""
-        import doctor
+        import zcp_doctor
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            doctor.verdict(True, True, True, True, False, True, True, None)
+            zcp_doctor.verdict(True, True, True, True, False, True, True, None)
         out = buf.getvalue()
         self.assertNotIn("★ 卡点", out)
         self.assertIn("链路完整", out)
@@ -3251,10 +3251,10 @@ class TestDoctorAutoInjectWording(unittest.TestCase):
 
     def test_verdict_still_blocks_when_hook_never_ran(self):
         """去掉 saved 这道闸之后，「钩子没跑」仍然必须被报成卡点。"""
-        import doctor
+        import zcp_doctor
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            doctor.verdict(True, True, True, True, False, True, False, None)
+            zcp_doctor.verdict(True, True, True, True, False, True, False, None)
         out = buf.getvalue()
         self.assertIn("★ 卡点", out)
         self.assertIn("从未运行过", out)
@@ -3272,21 +3272,21 @@ class TestDoctorFlagsStaleInjection(unittest.TestCase):
     """
 
     def _run_with(self, check_output):
-        import doctor
-        orig = doctor.subprocess.run
+        import zcp_doctor
+        orig = zcp_doctor.subprocess.run
 
         class _R:
             returncode = 0
             stdout = check_output
             stderr = ""
 
-        doctor.subprocess.run = lambda *a, **k: _R()
+        zcp_doctor.subprocess.run = lambda *a, **k: _R()
         buf = io.StringIO()
         try:
             with contextlib.redirect_stdout(buf):
-                doctor.check_patches()
+                zcp_doctor.check_patches()
         finally:
-            doctor.subprocess.run = orig
+            zcp_doctor.subprocess.run = orig
         return buf.getvalue()
 
     _STALE = ("=== 增强提示词注入，目标 1 处，模式：检查 ===\n"
@@ -3311,20 +3311,20 @@ class TestDoctorFlagsStaleInjection(unittest.TestCase):
         self.assertNotIn("旧版片段", out)
 
     def test_patcher_check_output_uses_the_documented_stale_wording(self):
-        """`--check` 的措辞是 doctor 与 sync 共同依赖的接口，不能随手改。
+        """`--check` 的措辞是 zcp_doctor 与 zcp_sync 共同依赖的接口，不能随手改。
 
         这个串同时被两处消费：
-          * `sync.check_state()` 据此返回 `stale`（要求重跑注入）
-          * `doctor.check_patches()` 据此提示用户
+          * `zcp_sync.check_state()` 据此返回 `stale`（要求重跑注入）
+          * `zcp_doctor.check_patches()` 据此提示用户
         改掉「含旧版组件」这几个字会让**两边同时静默失效** —— 又回到
         「全绿但不生效」的老坑。所以在这里把措辞本身钉死。
         """
         src = (Path(__file__).resolve().parent.parent
-               / "skills" / "zcode-pilot" / "scripts" / "zcode_patcher.py")
+               / "skills" / "zcode-pilot" / "scripts" / "zcp_patcher.py")
         text = src.read_text(encoding="utf-8")
         self.assertIn("含旧版组件，重跑可自动更新", text,
-                      "zcode_patcher.py 改变了旧版组件的措辞；"
-                      "sync.check_state 与 doctor 都依赖它，必须同步更新")
+                      "zcp_patcher.py 改变了旧版组件的措辞；"
+                      "zcp_sync.check_state 与 zcp_doctor 都依赖它，必须同步更新")
 
 
 class TestDoctorWatchdogSection(unittest.TestCase):
@@ -3342,18 +3342,18 @@ class TestDoctorWatchdogSection(unittest.TestCase):
 
     def _run_with(self, log_text: str | None):
         """把 WATCHDOG_LOG 指向临时文件（或不存在），跑第 7.5 节并捕获输出。"""
-        import doctor
-        orig = doctor.WATCHDOG_LOG
-        tmp = Path(tempfile.mkdtemp(prefix="zcode-watchdog-")) / "_apply_after_exit.log"
+        import zcp_doctor
+        orig = zcp_doctor.WATCHDOG_LOG
+        tmp = Path(tempfile.mkdtemp(prefix="zcode-watchdog-")) / "_zcp_watchdog.log"
         if log_text is not None:
             tmp.write_text(log_text, encoding="utf-8")
-        doctor.WATCHDOG_LOG = tmp
+        zcp_doctor.WATCHDOG_LOG = tmp
         buf = io.StringIO()
         try:
             with contextlib.redirect_stdout(buf):
-                doctor.check_watchdog()
+                zcp_doctor.check_watchdog()
         finally:
-            doctor.WATCHDOG_LOG = orig
+            zcp_doctor.WATCHDOG_LOG = orig
         return buf.getvalue()
 
     # 真实场景（本机实测日志）：三次挂看护，一次都没等到退出
@@ -3408,7 +3408,7 @@ class TestDoctorWatchdogSection(unittest.TestCase):
     def test_section_runs_in_full_doctor(self):
         """第 7.5 节要被 main() 真正调用 —— 只写函数不接入等于没有。"""
         src = (Path(__file__).resolve().parent.parent
-               / "skills" / "zcode-pilot" / "scripts" / "doctor.py")
+               / "skills" / "zcode-pilot" / "scripts" / "zcp_doctor.py")
         text = src.read_text(encoding="utf-8")
         # 只看 main() 里的调用点（函数定义处也含同名子串，不能拿 index() 全局找）
         body = text[text.index("def main()"):]
@@ -3421,18 +3421,18 @@ class TestDoctorWatchdogSection(unittest.TestCase):
         self.assertLess(body.index("check_watchdog()"), body.index("check_patches()"))
 
     def test_watchdog_log_vocabulary_is_pinned(self):
-        """看护的日志措辞是 doctor 与 sync 共同依赖的接口，不能随手改。
+        """看护的日志措辞是 zcp_doctor 与 zcp_sync 共同依赖的接口，不能随手改。
 
         第 7.5 节靠这些子串分类：`看护启动` / `已退出（等待` / `DONE` /
-        `已再次运行` / `等待超时`。apply_after_exit.py 改了措辞 →
+        `已再次运行` / `等待超时`。zcp_watchdog.py 改了措辞 →
         自检会静默地把所有看护都统计成「启动」而永远不报警。
         """
         src = (Path(__file__).resolve().parent.parent
-               / "skills" / "zcode-pilot" / "scripts" / "apply_after_exit.py")
+               / "skills" / "zcode-pilot" / "scripts" / "zcp_watchdog.py")
         text = src.read_text(encoding="utf-8")
         for phrase in ("看护启动，等待 ZCode 退出", "ZCode 已退出（等待", "DONE",
                        "已再次运行", "等待超时"):
-            self.assertIn(phrase, text, f"apply_after_exit.py 改变了措辞：{phrase}")
+            self.assertIn(phrase, text, f"zcp_watchdog.py 改变了措辞：{phrase}")
 
 
 class TestSubprocessTimeouts(unittest.TestCase):
@@ -3440,14 +3440,14 @@ class TestSubprocessTimeouts(unittest.TestCase):
 
     这两处此前没有超时，而它们跑在**无人值守**路径上，一旦挂死就再也没有人来收拾：
 
-      * `bootstrap.py` 的 `run()` —— 要跑 `pip install` / `git clone`。
+      * `zcp_bootstrap.py` 的 `run()` —— 要跑 `pip install` / `git clone`。
         上游半开连接（代理不响应、registry 卡住）时进程**永久挂起**，
         用户只看到「卡住不动」，没有任何可操作信息，只能强杀。
         现在默认 1200s，超时返回 124（与 GNU timeout 一致），并把已产出的部分输出
         一起带出来（例如 pip 卡在哪个包），便于定位。
 
-      * `apply_after_exit.py` 的两处 —— 看护是后台无人值守进程，
-        `tasklist` 可被 WMI 打嗝挂住、`zcode_patcher.py` 可在被锁的 asar 上挂住。
+      * `zcp_watchdog.py` 的两处 —— 看护是后台无人值守进程，
+        `tasklist` 可被 WMI 打嗝挂住、`zcp_patcher.py` 可在被锁的 asar 上挂住。
         现象会和「7.5 节：看护从未等到退出」长得一模一样，极难区分。
         现在 `tasklist` 30s（超时按「仍在运行」保守处理）、补丁 600s。
 
@@ -3480,24 +3480,24 @@ class TestSubprocessTimeouts(unittest.TestCase):
             missing.append(n.lineno)
         return missing
 
-    def test_apply_after_exit_has_all_timeouts(self):
+    def test_zcp_watchdog_has_all_timeouts(self):
         """看护是无人值守进程，任何一个子进程都不允许无限等。"""
-        missing = self._runs_without_timeout(self.SCRIPTS / "apply_after_exit.py")
+        missing = self._runs_without_timeout(self.SCRIPTS / "zcp_watchdog.py")
         self.assertEqual(missing, [],
-                         f"apply_after_exit.py 第 {missing} 行的 subprocess.run 缺 timeout=")
+                         f"zcp_watchdog.py 第 {missing} 行的 subprocess.run 缺 timeout=")
 
     def test_bootstrap_runner_has_timeout(self):
         """bootstrap 的 run() 要跑网络安装，必须有超时（默认值即可）。"""
         missing = self._runs_without_timeout(Path(__file__).resolve().parent.parent
-                                            / "bootstrap.py")
+                                            / "zcp_bootstrap.py")
         self.assertEqual(missing, [],
-                         f"bootstrap.py 第 {missing} 行的 subprocess.run 缺 timeout=")
+                         f"zcp_bootstrap.py 第 {missing} 行的 subprocess.run 缺 timeout=")
 
     def test_bootstrap_handles_timeout_expired(self):
         """有超时还不够 —— 必须**处理** TimeoutExpired，否则异常直接冒到用户面前。"""
-        src = (Path(__file__).resolve().parent.parent / "bootstrap.py").read_text(encoding="utf-8")
+        src = (Path(__file__).resolve().parent.parent / "zcp_bootstrap.py").read_text(encoding="utf-8")
         self.assertIn("subprocess.TimeoutExpired", src,
-                      "bootstrap.py 没有捕获 TimeoutExpired：超时会抛裸异常")
+                      "zcp_bootstrap.py 没有捕获 TimeoutExpired：超时会抛裸异常")
         self.assertIn("DEFAULT_TIMEOUT", src, "缺少默认超时常量")
         self.assertIn("124", src, "超时的返回码约定应为 124（与 GNU timeout 一致）")
 
@@ -3508,7 +3508,7 @@ class TestSubprocessTimeouts(unittest.TestCase):
         WinError 5，而且此时看护已经错过退出时机，补丁永远写不进去。
         宁可多等一轮轮询。
         """
-        src = (self.SCRIPTS / "apply_after_exit.py").read_text(encoding="utf-8")
+        src = (self.SCRIPTS / "zcp_watchdog.py").read_text(encoding="utf-8")
         self.assertIn("TASKLIST_TIMEOUT", src)
         self.assertIn("return True", src,
                       "tasklist 超时分支必须 return True（视为仍在运行）")
@@ -3619,10 +3619,10 @@ class TestPluginHookSpec(unittest.TestCase):
                           f"{path} 应该用 ${{CLAUDE_PLUGIN_ROOT}} 定位脚本，不要写死路径")
 
 
-# ------------------------------------------------------- bootstrap.py（引导脚本）
+# ------------------------------------------------------- zcp_bootstrap.py（引导脚本）
 
 class TestBootstrapScript(unittest.TestCase):
-    """`bootstrap.py` 声称「Windows / macOS / Linux 都能直接运行、不含任何本机绝对路径」。
+    """`zcp_bootstrap.py` 声称「Windows / macOS / Linux 都能直接运行、不含任何本机绝对路径」。
 
     这类声明最容易静默失效：开发者在自己的机器上跑一次看到绿字，就把
     `D:\\ZCode` 或 `C:\\Users\\xxx` 留在了源码里；换台机器表现是「莫名其妙找不到文件」。
@@ -3635,9 +3635,9 @@ class TestBootstrapScript(unittest.TestCase):
     def setUpClass(cls):
         # 仓库根：tests/ 的上一级
         cls._repo = Path(__file__).resolve().parent.parent
-        cls._src_path = cls._repo / "bootstrap.py"
+        cls._src_path = cls._repo / "zcp_bootstrap.py"
         if not cls._src_path.is_file():
-            raise unittest.SkipTest("未找到 bootstrap.py")
+            raise unittest.SkipTest("未找到 zcp_bootstrap.py")
         cls._src = cls._src_path.read_text(encoding="utf-8")
 
     # ---------- 1. 无硬编码本机路径 ----------
@@ -3657,7 +3657,7 @@ class TestBootstrapScript(unittest.TestCase):
             "ZcodeData",
         ]
         hits = [b for b in banned if b in self._src]
-        self.assertEqual(hits, [], f"bootstrap.py 写死了本机路径：{hits}")
+        self.assertEqual(hits, [], f"zcp_bootstrap.py 写死了本机路径：{hits}")
 
     def test_repo_root_is_derived_from_dunder_file(self):
         """仓库根必须由 `__file__` 推导 —— 这样脚本放哪、从哪调用都对。"""
@@ -3771,10 +3771,10 @@ class TestBootstrapScript(unittest.TestCase):
     def test_no_high_unicode_glyphs_in_output(self):
         """输出只用 ASCII 标记（[+] / [x] / [!]），不依赖 ✓✗⚠ 这类字符。
 
-        理由：cp936 管道里打印这些字符会抛 UnicodeEncodeError（见 _console.py 的说明）。
+        理由：cp936 管道里打印这些字符会抛 UnicodeEncodeError（见 zcp_console.py 的说明）。
         """
         bad = [g for g in "✓✗⚠✅↻✔✘" if g in self._src]
-        self.assertEqual(bad, [], f"bootstrap.py 使用了高位 Unicode 符号：{bad}")
+        self.assertEqual(bad, [], f"zcp_bootstrap.py 使用了高位 Unicode 符号：{bad}")
 
     # ---------- 4. 步骤编排 ----------
 
@@ -3802,11 +3802,11 @@ class TestBootstrapScript(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# autopilot.py —— 全自动流水线（无人工干预）
+# zcp_pipeline.py —— 全自动流水线（无人工干预）
 # --------------------------------------------------------------------------- #
 
 def _load_autopilot():
-    """把 autopilot.py 当独立模块加载。
+    """把 zcp_pipeline.py 当独立模块加载。
 
     必须**先登记进 sys.modules**：文件里用了 `@dataclass`，dataclass 在装饰时会
     回头查 `sys.modules[cls.__module__]`，没登记就抛
@@ -3814,9 +3814,9 @@ def _load_autopilot():
     —— 报错位置在装饰器里，看起来完全不像「模块没登记」，很难猜。
     """
     import importlib.util
-    path = Path(__file__).resolve().parent.parent / "autopilot.py"
+    path = Path(__file__).resolve().parent.parent / "zcp_pipeline.py"
     if not path.is_file():
-        raise unittest.SkipTest("未找到 autopilot.py")
+        raise unittest.SkipTest("未找到 zcp_pipeline.py")
     spec = importlib.util.spec_from_file_location("_ap_under_test", path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules["_ap_under_test"] = mod
@@ -3825,7 +3825,7 @@ def _load_autopilot():
 
 
 class TestAutopilotErrorClassification(unittest.TestCase):
-    """`autopilot.py` 的错误分类是所有重试决策的唯一依据。
+    """`zcp_pipeline.py` 的错误分类是所有重试决策的唯一依据。
 
     分错类的后果不是「报错难看」，而是**行为错误**：
       * 把「文件被占用」判成不可恢复 → 明明等 1 秒就好，却直接失败收工；
@@ -3993,7 +3993,7 @@ class TestAutopilotRetryExecutor(unittest.TestCase):
 class TestAutopilotLogger(unittest.TestCase):
     """双通道日志：人看 `.log`，机器读 `.jsonl`。
 
-    这个项目里「机器读」不是锦上添花 —— 看护脚本、CI、doctor 都要靠事件流判断
+    这个项目里「机器读」不是锦上添花 —— 看护脚本、CI、zcp_doctor 都要靠事件流判断
     流水线到底停在哪一步，所以 JSONL 的**字段名**是接口，必须有测试兜住。
     """
 
@@ -4140,7 +4140,7 @@ class TestAutopilotSafety(unittest.TestCase):
             ".workbuddy-ai/binaries",
         ]
         hits = [b for b in banned if b in self._src]
-        self.assertEqual(hits, [], f"autopilot.py 写死了本机路径：{hits}")
+        self.assertEqual(hits, [], f"zcp_pipeline.py 写死了本机路径：{hits}")
 
     def test_repo_root_derived_from_dunder_file(self):
         self.assertIn("Path(__file__).resolve().parent", self._src)
@@ -4154,12 +4154,12 @@ class TestAutopilotSafety(unittest.TestCase):
         self.assertIn("_zcode_running()", self._src,
                       "部署前必须检查客户端是否在运行")
         body = self._src.split("def step_deploy(", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn("apply_after_exit", body,
+        self.assertIn("zcp_watchdog", body,
                       "客户端在运行时应当挂看护脚本，而不是直接写")
         self.assertIn("_zcode_running()", body)
 
-    def test_run_guard_is_delegated_to_zcode_patcher(self):
-        """运行守卫必须复用 `zcode_patcher` 的实现，不能自己另写一份。
+    def test_run_guard_is_delegated_to_zcp_patcher(self):
+        """运行守卫必须复用 `zcp_patcher` 的实现，不能自己另写一份。
 
         自己再写一份 `tasklist` 解析，迟早会和主实现漂移（客户端改进程名、
         守卫那边补了「正在退出中」的宽限期判断……）。而这里的判断决定的正是
@@ -4172,13 +4172,13 @@ class TestAutopilotSafety(unittest.TestCase):
                              "应提供 _native_zcode_running() 包装")
         # 在本仓库环境里，scripts 目录是可导入的，守卫应当真的借到了
         self.assertIsNotNone(self.ap._import_run_guard(),
-                             "在本仓库里应当能导入 zcode_patcher.zcode_running")
+                             "在本仓库里应当能导入 zcp_patcher.zcode_running")
         guard = self.ap._import_run_guard()
         self.assertTrue(callable(guard))
         # 借来的必须就是主实现本体，而不是又被包了一层
-        import zcode_patcher as zp
+        import zcp_patcher as zp
         self.assertIs(guard, zp.zcode_running,
-                      "_native_zcode_running 必须直接复用 zcode_patcher.zcode_running")
+                      "_native_zcode_running 必须直接复用 zcp_patcher.zcode_running")
 
     def test_running_guard_unavailable_falls_back_without_crashing(self):
         """主实现不可用时要降级到自带探测，而不是抛异常拖垮流水线。
@@ -4222,7 +4222,7 @@ class TestAutopilotSafety(unittest.TestCase):
         统一用 [*]/[+]/[!]/[x] 标记。
         """
         bad = [g for g in "✓✗⚠✅↻✔✘" if g in self._src]
-        self.assertEqual(bad, [], f"autopilot.py 使用了高位 Unicode 符号：{bad}")
+        self.assertEqual(bad, [], f"zcp_pipeline.py 使用了高位 Unicode 符号：{bad}")
 
     def test_never_downloads_and_pipes_a_binary(self):
         """自动装依赖只走包管理器，不 `curl ... | sh`。
@@ -4337,25 +4337,25 @@ class TestAutopilotCli(unittest.TestCase):
 
 
 class TestRunnerEntrypoints(unittest.TestCase):
-    """`run.sh` / `run.cmd` —— 「一条命令跑完全流程」的入口。
+    """`zcp-run.sh` / `zcp-run.cmd` —— 「一条命令跑完全流程」的入口。
 
     跨平台入口最难测也最容易坏：**开发机器上永远是好的**。
     真出事的地方是「从别的目录调用」「路径含空格」「换台机器换了 Python 安装方式」，
-    所以这里刻意用不同调用姿势去跑，而不是只测一次 `./run.sh`。
+    所以这里刻意用不同调用姿势去跑，而不是只测一次 `./zcp-run.sh`。
     """
 
     @classmethod
     def setUpClass(cls):
         cls._repo = Path(__file__).resolve().parent.parent
-        cls._sh = cls._repo / "run.sh"
-        cls._cmd = cls._repo / "run.cmd"
+        cls._sh = cls._repo / "zcp-run.sh"
+        cls._cmd = cls._repo / "zcp-run.cmd"
         if not cls._sh.is_file() and not cls._cmd.is_file():
-            raise unittest.SkipTest("未找到 run.sh / run.cmd")
+            raise unittest.SkipTest("未找到 zcp-run.sh / zcp-run.cmd")
 
-    # ---------- run.cmd（Windows） ----------
+    # ---------- zcp-run.cmd（Windows） ----------
 
     def test_cmd_script_is_pure_ascii(self):
-        """`run.cmd` 必须**全 ASCII**。
+        """`zcp-run.cmd` 必须**全 ASCII**。
 
         cmd.exe 解析 .cmd/.bat 用的是 **OEM 代码页**（中文 Windows = 936/GBK），
         不是 UTF-8。文件里一旦有中文注释，cmd 会按 GBK 把字节流拆错，
@@ -4363,19 +4363,19 @@ class TestRunnerEntrypoints(unittest.TestCase):
         实测直接把整份脚本跑崩（rc=255）。
         """
         if not self._cmd.is_file():
-            self.skipTest("无 run.cmd（非 Windows 布局）")
+            self.skipTest("无 zcp-run.cmd（非 Windows 布局）")
         raw = self._cmd.read_bytes()
         bad = [(i, b) for i, b in enumerate(raw) if b > 0x7F]
         if bad:
             line = raw[:bad[0][0]].count(b"\n") + 1
-            self.fail(f"run.cmd 第 {line} 行含非 ASCII 字节 {bad[0][1]:#x}；"
+            self.fail(f"zcp-run.cmd 第 {line} 行含非 ASCII 字节 {bad[0][1]:#x}；"
                       "cmd.exe 会按 OEM 代码页解析，导致语法错乱")
 
-    @unittest.skipUnless(os.name == "nt", "run.cmd 仅 Windows 可执行")
+    @unittest.skipUnless(os.name == "nt", "zcp-run.cmd 仅 Windows 可执行")
     def test_cmd_runs_and_returns_zero(self):
         if not self._cmd.is_file():
-            self.skipTest("无 run.cmd")
-        p = subprocess.run(["cmd.exe", "/c", "run.cmd", "--only", "env", "--quiet"],
+            self.skipTest("无 zcp-run.cmd")
+        p = subprocess.run(["cmd.exe", "/c", "zcp-run.cmd", "--only", "env", "--quiet"],
                            cwd=str(self._repo), capture_output=True,
                            errors="replace", encoding="utf-8", timeout=180)
         out = (p.stdout or "") + (p.stderr or "")
@@ -4384,17 +4384,17 @@ class TestRunnerEntrypoints(unittest.TestCase):
         self.assertNotIn("请按任意键", out)
         self.assertNotIn("Press any key", out)
 
-    @unittest.skipUnless(os.name == "nt", "run.cmd 仅 Windows 可执行")
+    @unittest.skipUnless(os.name == "nt", "zcp-run.cmd 仅 Windows 可执行")
     def test_cmd_propagates_failure_exit_code(self):
         """参数错误必须把非 0 退出码透传出去（批处理最容易吞掉 ERRORLEVEL）。"""
         if not self._cmd.is_file():
-            self.skipTest("无 run.cmd")
-        p = subprocess.run(["cmd.exe", "/c", "run.cmd", "--only", "bogus-step"],
+            self.skipTest("无 zcp-run.cmd")
+        p = subprocess.run(["cmd.exe", "/c", "zcp-run.cmd", "--only", "bogus-step"],
                            cwd=str(self._repo), capture_output=True,
                            errors="replace", encoding="utf-8", timeout=180)
         self.assertNotEqual(p.returncode, 0, "参数错误却返回了成功")
 
-    # ---------- run.sh（POSIX / Git Bash） ----------
+    # ---------- zcp-run.sh（POSIX / Git Bash） ----------
 
     @unittest.skipIf(os.name == "nt" and not shutil.which("sh"),
                      "无 sh 可用")
@@ -4404,16 +4404,16 @@ class TestRunnerEntrypoints(unittest.TestCase):
         真实踩过的坑：`pwd -P` 在 Git Bash 里给的是 `/f/ZcodeData/...`，
         再交给原生 python.exe 时 MSYS 会把它当成「相对路径」二次转换，
         最终变成 `F:\\f\\ZcodeData\\...` —— 一个**看起来像路径、其实不存在**的东西，
-        报错是「找不到 autopilot.py」，和真实原因（路径改写）毫无关系。
+        报错是「找不到 zcp_pipeline.py」，和真实原因（路径改写）毫无关系。
         """
         if not self._sh.is_file():
-            self.skipTest("无 run.sh")
+            self.skipTest("无 zcp-run.sh")
         invocations = [
-            ("相对路径 ./run.sh", str(self._repo), ["sh", "./run.sh"]),
+            ("相对路径 ./zcp-run.sh", str(self._repo), ["sh", "./zcp-run.sh"]),
             ("绝对 POSIX 路径", str(self._repo),
              ["sh", str(self._sh).replace("\\", "/")]),
             ("从上级目录调用", str(self._repo.parent),
-             ["sh", f"{self._repo.name}/run.sh"]),
+             ["sh", f"{self._repo.name}/zcp-run.sh"]),
         ]
         for label, cwd, argv in invocations:
             with self.subTest(label=label):

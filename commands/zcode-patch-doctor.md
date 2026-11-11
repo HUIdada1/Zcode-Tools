@@ -6,10 +6,10 @@ description: 诊断 ZCode 增强补丁链路状态与安装健康度，支持一
 
 ```bash
 # 诊断模式：检查插件配置、启用状态、客户端路径与补丁注入状态
-python "<skill目录>/scripts/doctor.py"
+python "<skill目录>/scripts/zcp_doctor.py"
 
 # 自愈模式：自动将插件置为启用，并在退出 ZCode 后自动补齐全部补丁
-python "<skill目录>/scripts/doctor.py" --fix
+python "<skill目录>/scripts/zcp_doctor.py" --fix
 ```
 
 要求：

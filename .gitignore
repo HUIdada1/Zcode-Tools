@@ -1,10 +1,14 @@
 # 运行时产物
-_sync.log
-_sync.last
+_zcp_sync.log
+_zcp_sync.last
 _watchdog.pid
 _watchdog.want
 _client_fingerprint.json
 _autoinject.done
+_zcp_watchdog.log
+# 0.9.0 改名前的旧文件名：老版本目录/历史日志还会出现，保留忽略
+_sync.log
+_sync.last
 _apply_after_exit.log
 apply_after_exit.log
 __pycache__/
@@ -37,7 +41,7 @@ _autocontinue.log
 tap-capture*.jsonl
 probe-max-tokens*.jsonl
 
-# 全自动流水线日志（autopilot.py / run.sh / run.cmd 运行时产物）
+# 全自动流水线日志（zcp_pipeline.py / zcp-run.sh / zcp-run.cmd 运行时产物）
 logs/
 ci-report.md
 
@@ -49,6 +53,7 @@ Thumbs.db
 apply_after_exit.log
 
 # 本地 agent / 工具工作目录
+.workbuddy/
 .workbuddy-ai/
 .box-agent/
 .box-agent-scratch/

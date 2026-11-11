@@ -8,11 +8,11 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 主流水线：直接调用 autopilot.py，一次跑完 env -> deps -> build -> test
+  # 主流水线：直接调用 zcp_pipeline.py，一次跑完 env -> deps -> build -> test
   # CI 环境不注入 app.asar（--no-deploy），部署步骤由本机看护脚本负责
   # ---------------------------------------------------------------------------
   pipeline:
-    name: autopilot (${{ matrix.os }} / py${{ matrix.python-version }})
+    name: zcp-pipeline (${{ matrix.os }} / py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -43,15 +43,15 @@ jobs:
       # 全自动流水线：依赖自检 -> 构建检查 -> 回归测试，产出机器可读报告
       # Python 统一 UTF-8：Windows runner 默认 cp1252，中文日志会在 print 时直接抛
       # UnicodeEncodeError（表现为「一条日志都没有、exit 1」）。
-      - name: 全自动流水线（autopilot）
-        if: hashFiles('autopilot.py') != ''
+      - name: 全自动流水线（zcp-pipeline）
+        if: hashFiles('zcp_pipeline.py') != ''
         shell: bash
         env:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: "utf-8"
         run: |
           mkdir -p logs
-          python autopilot.py --no-deploy --unattended --report ci-report.md --log logs/ci.log 2>&1 | tee logs/stdout.log
+          python zcp_pipeline.py --no-deploy --unattended --report ci-report.md --log logs/ci.log 2>&1 | tee logs/stdout.log
 
       # 公开仓库的 Actions 日志下载需要管理员权限；失败时把关键日志写进
       # job annotation（匿名可读），方便无本地环境时直接定位。
@@ -71,12 +71,12 @@ jobs:
                   lines.extend(f.read_text(encoding="utf-8", errors="replace").splitlines()[-n:])
           if not lines:
               lines = ["<no log file>"]
-          print(f"::error title=autopilot-log::{esc(chr(10).join(lines))}")
+          print(f"::error title=zcp-pipeline-log::{esc(chr(10).join(lines))}")
           PY
 
-      # 兼容旧布局：若仓库里还没有 autopilot.py，退回逐项语法检查
+      # 兼容旧布局：若仓库里还没有 zcp_pipeline.py，退回逐项语法检查
       - name: 语法检查（Python，回退路径）
-        if: hashFiles('autopilot.py') == ''
+        if: hashFiles('zcp_pipeline.py') == ''
         shell: bash
         run: |
           set -e
@@ -87,7 +87,7 @@ jobs:
           done
 
       - name: 语法检查（注入脚本，回退路径）
-        if: hashFiles('autopilot.py') == ''
+        if: hashFiles('zcp_pipeline.py') == ''
         shell: bash
         run: |
           set -e
@@ -97,7 +97,7 @@ jobs:
           done
 
       - name: 回归测试（回退路径）
-        if: hashFiles('autopilot.py') == ''
+        if: hashFiles('zcp_pipeline.py') == ''
         run: python -m unittest discover -s tests -v
 
       # 新能力「自动继续」的权威注册点在 hooks/hooks.json：JSON 写坏或漏注册
@@ -106,8 +106,8 @@ jobs:
       - name: 校验 hooks.json（自动继续注册）
         shell: bash
         run: |
-          python -c "import json,pathlib,sys; h=json.loads(pathlib.Path('hooks/hooks.json').read_text(encoding='utf-8'))['hooks']; m=[e for e in ('Stop','UserPromptSubmit') if e not in h or 'autocontinue_hook.py' not in h[e][0]['hooks'][0]['command']]; sys.exit('hooks.json 注册异常: '+','.join(m) if m else 0)"
-          echo "hooks.json OK: Stop / UserPromptSubmit 已指向 autocontinue_hook.py"
+          python -c "import json,pathlib,sys; h=json.loads(pathlib.Path('hooks/hooks.json').read_text(encoding='utf-8'))['hooks']; m=[e for e in ('Stop','UserPromptSubmit') if e not in h or 'zcp_hook.py' not in h[e][0]['hooks'][0]['command']]; sys.exit('hooks.json 注册异常: '+','.join(m) if m else 0)"
+          echo "hooks.json OK: Stop / UserPromptSubmit 已指向 zcp_hook.py"
 
       # 无论成功失败都留下报告与日志，便于定位偶发问题
       - name: 上传流水线报告

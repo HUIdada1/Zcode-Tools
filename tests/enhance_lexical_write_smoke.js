@@ -243,7 +243,7 @@ async function runTests() {
     vm.runInContext(src, ctx);
 
     // 触发 writeText
-    // 通过 window.__zenhanceDiag 或全局环境
+    // 通过 window.__zcpPolishDiag 或全局环境
     const ok = win.document.body.querySelector("[data-lexical-editor='true']");
     if (!ok) throw new Error("测试 1 失败：未能通过选择器找到 Lexical 节点");
 
@@ -253,12 +253,12 @@ async function runTests() {
     const writeResult = vm.runInContext(`
       (function() {
         const el = document.querySelector("[data-lexical-editor='true']");
-        return window.__zenhanceDiag.writeText(el, ${JSON.stringify(testText)});
+        return window.__zcpPolishDiag.writeText(el, ${JSON.stringify(testText)});
       })()
     `, ctx);
 
     if (!writeResult) throw new Error("测试 1 失败：writeText 在 Lexical 环境下返回 false");
-    const diag = vm.runInContext("window.__zenhanceDiag", ctx);
+    const diag = vm.runInContext("window.__zcpPolishDiag", ctx);
     if (diag.lastWriteMethod !== "lexical-parse-state") {
       throw new Error("测试 1 失败：预期 lastWriteMethod 为 lexical-parse-state，实际为 " + diag.lastWriteMethod);
     }
@@ -310,12 +310,12 @@ async function runTests() {
     const writeResult = vm.runInContext(`
       (function() {
         const el = document.querySelector("[data-lexical-editor='true']");
-        return window.__zenhanceDiag.writeText(el, ${JSON.stringify(testText)});
+        return window.__zcpPolishDiag.writeText(el, ${JSON.stringify(testText)});
       })()
     `, ctx);
 
     if (!writeResult) throw new Error("测试 2 失败：writeText 在 Fiber 暴露环境下返回 false");
-    const diag = vm.runInContext("window.__zenhanceDiag", ctx);
+    const diag = vm.runInContext("window.__zcpPolishDiag", ctx);
     if (diag.lastWriteMethod !== "fiber-editor-api") {
       throw new Error("测试 2 失败：预期 lastWriteMethod 为 fiber-editor-api，实际为 " + diag.lastWriteMethod);
     }
@@ -349,12 +349,12 @@ async function runTests() {
     const writeResult = vm.runInContext(`
       (function() {
         const el = document.querySelector("[contenteditable='true']");
-        return window.__zenhanceDiag.writeText(el, ${JSON.stringify(testText)});
+        return window.__zcpPolishDiag.writeText(el, ${JSON.stringify(testText)});
       })()
     `, ctx);
 
     if (!writeResult) throw new Error("测试 3 失败：writeText 剪贴板降级返回 false");
-    const diag = vm.runInContext("window.__zenhanceDiag", ctx);
+    const diag = vm.runInContext("window.__zcpPolishDiag", ctx);
     if (diag.lastWriteMethod !== "clipboard-paste") {
       throw new Error("测试 3 失败：预期 lastWriteMethod 为 clipboard-paste，实际为 " + diag.lastWriteMethod);
     }
@@ -380,7 +380,7 @@ async function runTests() {
     const writeResult = vm.runInContext(`
       (function() {
         const el = document.querySelector("textarea");
-        return window.__zenhanceDiag.writeText(el, ${JSON.stringify(testText)});
+        return window.__zcpPolishDiag.writeText(el, ${JSON.stringify(testText)});
       })()
     `, ctx);
 
@@ -416,7 +416,7 @@ async function runTests() {
     const writeResult = vm.runInContext(`
       (function() {
         const el = document.querySelector("[contenteditable='true']");
-        return window.__zenhanceDiag.writeText(el, ${JSON.stringify(testText)});
+        return window.__zcpPolishDiag.writeText(el, ${JSON.stringify(testText)});
       })()
     `, ctx);
 

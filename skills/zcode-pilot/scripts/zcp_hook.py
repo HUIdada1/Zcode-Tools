@@ -52,11 +52,11 @@ from pathlib import Path
 # 依赖（全部包在 try 里：模块级异常会直接变成 traceback → 污染上下文）
 # --------------------------------------------------------------------------
 
-try:  # 控制台编码安全网（见 _console.py 的说明）
-    from _console import safe_stdio
+try:  # 控制台编码安全网（见 zcp_console.py 的说明）
+    from zcp_console import safe_stdio
 except Exception:  # pragma: no cover - 兜底：没有它也照常工作
     try:
-        from scripts._console import safe_stdio  # type: ignore
+        from scripts.zcp_console import safe_stdio  # type: ignore
     except Exception:
         def safe_stdio() -> None:
             return None
@@ -65,9 +65,9 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 try:
-    import loopguard  # 同目录；循环守卫（独立模块，见 loopguard.py）
+    import zcp_loopguard  # 同目录；循环守卫（独立模块，见 zcp_loopguard.py）
 except Exception:  # pragma: no cover
-    loopguard = None
+    zcp_loopguard = None
 
 
 # --------------------------------------------------------------------------
@@ -383,7 +383,7 @@ def signals(payload: dict, data: dict) -> dict:
 # --------------------------------------------------------------------------
 
 def gate(state: dict, sid: str | None = None) -> str:
-    """前置开关：任一不满足即不续跑（也保证「关闭自动继续时 loopguard 不被调用」）。
+    """前置开关：任一不满足即不续跑（也保证「关闭自动继续时 zcp_loopguard 不被调用」）。
 
     传入 `sid` 时不看旧的全局 `runtime` —— 按会话模式由 `session_mode_of` 决定；
     这样老用户 `runtime=false` 后只要把某个会话切回开启，该会话就能恢复，
@@ -434,11 +434,11 @@ def decide(payload: dict, state: dict, data: dict, consecutive: int,
     if limit > 0 and consecutive >= limit:
         return TEXT_OVER_LIMIT, True, "over-limit"
 
-    # 序 2：重复动作循环（loopguard，独立模块）；设置页可关闭。
+    # 序 2：重复动作循环（zcp_loopguard，独立模块）；设置页可关闭。
     guard_enabled = True if settings is None else bool(settings.get("loopGuard", True))
-    if guard_enabled and loopguard is not None:
+    if guard_enabled and zcp_loopguard is not None:
         try:
-            hit = loopguard.detect(_transcript_of(payload))
+            hit = zcp_loopguard.detect(_transcript_of(payload))
         except Exception:
             hit = None
         if hit and hit.get("looped"):
@@ -571,7 +571,7 @@ def handle_stop(payload: dict, state: dict) -> None:
     consecutive = consecutive_of(state, sid)
     max_consecutive = int(cfg.get("maxConsecutive") or MAX_CONSECUTIVE)
     transcript = _transcript_of(payload)
-    data = loopguard.load_transcript(transcript) if loopguard is not None else {
+    data = zcp_loopguard.load_transcript(transcript) if zcp_loopguard is not None else {
         "calls": [], "results": {}, "last_assistant_text": "",
         "usage": {}, "finish_reason": None, "status": None,
     }

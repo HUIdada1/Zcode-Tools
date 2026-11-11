@@ -15,11 +15,11 @@
   4. 每个步骤幂等、可单独跳过、可整体干跑（`--dry-run`）。
 
 用法：
-    python bootstrap.py                 # 自检 + 构建校验 + 测试 + 状态
-    python bootstrap.py --all-steps     # 额外把补丁真正注入客户端（需先退出 ZCode）
-    python bootstrap.py --only test     # 只跑某几步，逗号分隔
-    python bootstrap.py --skip install
-    python bootstrap.py --dry-run       # 只打印将要执行的命令，不真的执行
+    python zcp_bootstrap.py                 # 自检 + 构建校验 + 测试 + 状态
+    python zcp_bootstrap.py --all-steps     # 额外把补丁真正注入客户端（需先退出 ZCode）
+    python zcp_bootstrap.py --only test     # 只跑某几步，逗号分隔
+    python zcp_bootstrap.py --skip install
+    python zcp_bootstrap.py --dry-run       # 只打印将要执行的命令，不真的执行
 
 退出码：0 全部成功；1 有关键步骤失败；2 环境不满足最低要求（Python 版本过低）。
 """
@@ -45,22 +45,22 @@ TESTS = HERE / "tests"
 
 try:
     sys.path.insert(0, str(SCRIPTS))
-    from _console import safe_stdio
+    from zcp_console import safe_stdio
     safe_stdio()
 except Exception:
     pass
 
 PY_MIN = (3, 10)                                 # README 声明的 Python 下限
 REQUIRED_PY_FILES = [                            # 「构建」要过语法关的 Python 源文件
-    SCRIPTS / "zcode_patcher.py",
-    SCRIPTS / "sync.py",
-    SCRIPTS / "doctor.py",
-    SCRIPTS / "apply_after_exit.py",
-    SCRIPTS / "autocontinue_hook.py",             # 自动继续：Stop / UserPromptSubmit hook
-    SCRIPTS / "loopguard.py",                     # 自动继续：循环守卫（独立模块）
-    SCRIPTS / "_console.py",
+    SCRIPTS / "zcp_patcher.py",
+    SCRIPTS / "zcp_sync.py",
+    SCRIPTS / "zcp_doctor.py",
+    SCRIPTS / "zcp_watchdog.py",
+    SCRIPTS / "zcp_hook.py",             # 自动继续：Stop / UserPromptSubmit hook
+    SCRIPTS / "zcp_loopguard.py",                     # 自动继续：循环守卫（独立模块）
+    SCRIPTS / "zcp_console.py",
 ]
-PATCHER = SCRIPTS / "zcode_patcher.py"
+PATCHER = SCRIPTS / "zcp_patcher.py"
 
 #: 子进程默认超时（秒）。本脚本会跑 `pip install` / `git clone` 等网络操作，
 #: 没有超时一旦上游半开连接就会**永久挂死**（用户只看到「卡住」）。
@@ -381,7 +381,7 @@ def step_install(args) -> None:
         ok("客户端位置探测完成")
     else:
         warn("未探测到 ZCode 安装（客户端未装 / 装在非标准位置均可忽略本步）。")
-        info("  稍后可用： python skills/zcode-pilot/scripts/zcode_patcher.py <安装根>  ← 手动指定")
+        info("  稍后可用： python skills/zcode-pilot/scripts/zcp_patcher.py <安装根>  ← 手动指定")
 
 
 def step_build(args) -> None:
@@ -469,7 +469,7 @@ def step_status(args) -> None:
 
     if "版本旧" in out or "旧版" in out:
         warn("检测到已注入的补丁版本较旧（或与当前脚本不同源）。")
-        info("  查看差异： python skills/zcode-pilot/scripts/zcode_patcher.py --all --dry-run")
+        info("  查看差异： python skills/zcode-pilot/scripts/zcp_patcher.py --all --dry-run")
     info("要把补丁真正写入客户端：**先完全退出 ZCode**，再执行")
     info(f"  {args.python} {PATCHER} --all")
 
@@ -480,14 +480,14 @@ def step_status(args) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        prog="bootstrap.py",
+        prog="zcp_bootstrap.py",
         description="zcode-pilot（ZCode 工具箱）跨平台引导：环境自检 → 依赖检查 → 构建校验 → 测试 → 状态。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="示例：\n"
-               "  python bootstrap.py\n"
-               "  python bootstrap.py --only build,test\n"
-               "  python bootstrap.py --skip test --dry-run\n"
-               "  python bootstrap.py --all-steps          # 额外真正注入客户端（需先退出 ZCode）",
+               "  python zcp_bootstrap.py\n"
+               "  python zcp_bootstrap.py --only build,test\n"
+               "  python zcp_bootstrap.py --skip test --dry-run\n"
+               "  python zcp_bootstrap.py --all-steps          # 额外真正注入客户端（需先退出 ZCode）",
     )
     ap.add_argument("--only", metavar="STEPS",
                     help=f"只执行指定步骤（逗号分隔）。可选：{','.join(STEP_ORDER)}")
@@ -569,8 +569,8 @@ def main() -> int:
     print()
     info("下一步：")
     info("  1. 没装插件： ZCode → 设置 → 插件 → 创建 → 添加插件市场 → HUIdada1/Zcode-Tools")
-    info("  2. 想用命令行： python skills/zcode-pilot/scripts/zcode_patcher.py --all --check")
-    info("  3. 打了补丁但没生效： python skills/zcode-pilot/scripts/doctor.py")
+    info("  2. 想用命令行： python skills/zcode-pilot/scripts/zcp_patcher.py --all --check")
+    info("  3. 打了补丁但没生效： python skills/zcode-pilot/scripts/zcp_doctor.py")
     return 0
 
 

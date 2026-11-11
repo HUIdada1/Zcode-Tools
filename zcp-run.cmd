@@ -1,12 +1,12 @@
 @echo off
 rem zcode-toolkit one-click entry point for Windows.
 rem
-rem Finds a usable Python and forwards all arguments to autopilot.py.
+rem Finds a usable Python and forwards all arguments to zcp_pipeline.py.
 rem
 rem Usage:
-rem   run.cmd                 full automated run
-rem   run.cmd --no-deploy     build + test only, do not touch the client
-rem   run.cmd --unattended    unattended mode (for CI)
+rem   zcp-run.cmd                 full automated run
+rem   zcp-run.cmd --no-deploy     build + test only, do not touch the client
+rem   zcp-run.cmd --unattended    unattended mode (for CI)
 rem
 rem NOTE 1: this file is deliberately pure ASCII. cmd.exe parses .cmd/.bat files
 rem using the OEM code page (936/GBK on Chinese Windows), so UTF-8 comments with
@@ -52,7 +52,7 @@ if not defined PY (
 )
 
 set "PYTHONIOENCODING=utf-8"
-%PY% "%SCRIPT_DIR%autopilot.py" %*
+%PY% "%SCRIPT_DIR%zcp_pipeline.py" %*
 set "RC=%ERRORLEVEL%"
 
 rem Pause only when double-clicked (no arguments and parent cmd line contains this script name),

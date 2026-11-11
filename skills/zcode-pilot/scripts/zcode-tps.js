@@ -58,11 +58,11 @@
  * 安全：只读事件流、只写自己的 host 元素与浮层节点；异常静默；找不到挂载点时自清理。
  * 位置：**固定挂在「输入框下方」**（composer-below）。右键切换位置已按用户要求移除，
  *   历史遗留在 localStorage 的 `ztps-pos` 会在启动时清掉，不再有第二个挂载点分支。
- * 回滚：脚本/补丁异常时用 scripts/restore_clean.py --latest 秒级还原，无需重装。
+ * 回滚：脚本/补丁异常时用 scripts/zcp_restore.py --latest 秒级还原，无需重装。
  */
 (() => {
-  if (window.__ztps) return;
-  window.__ztps = true;
+  if (window.__zcpMeter) return;
+  window.__zcpMeter = true;
   const dec = new TextDecoder();
   const MARK = "data-ztps";
 
@@ -396,7 +396,7 @@
       t.totalTokens += ev.totalTokens || 0;
       t.modelId = ev.modelId || t.modelId;
       if (t.modelId && typeof window !== "undefined") {
-        window.__ztpsCurrentModelId = t.modelId;
+        window.__zcpMeterModelId = t.modelId;
       }
       t.sessionId = ev.sessionId || t.sessionId;
       t.lastUsageAt = ev.occurredAt ?? t.lastUsageAt;
@@ -553,7 +553,7 @@
   // 挂载基准 = composer 卡片（v4-composer）：胶囊作为卡片的下一个兄弟节点，与输入框同宽。
   // 历史：曾支持「工具栏行内 / 会话顶部 sticky」两种额外落点，实测会被误认成官方控件、
   // 且遮挡会话标题行，已按用户要求下线 —— 位置固定，不可更改。
-  // 诊断：window.__ztpsDiag 暴露每一环的探测结果（选择器命中数/是否找到卡片），
+  // 诊断：window.__zcpMeterDiag 暴露每一环的探测结果（选择器命中数/是否找到卡片），
   // 版本升级后若胶囊消失，先在 console 看该对象定位失败环节。
   const COMPOSER_INPUT_SELECTORS = [
     "[data-testid='v4-composer-input']",
@@ -621,10 +621,10 @@
     return card || null;
   }
 
-  // 诊断对象（console 里直接看 window.__ztpsDiag）
+  // 诊断对象（console 里直接看 window.__zcpMeterDiag）
   let diag = null;
   try {
-    diag = window.__ztpsDiag = window.__ztpsDiag || {};
+    diag = window.__zcpMeterDiag = window.__zcpMeterDiag || {};
     diag.scriptVersion = "3.17-pilot-ui-4";
     diag.loadedAt = new Date().toISOString();
   } catch (err) { /* ignore */ }
@@ -1157,13 +1157,13 @@
 
   // ---------- 端口获取 ----------
   function hookPort(port) {
-    if (!port || port.__ztps) return;
-    port.__ztps = true;
+    if (!port || port.__zcpMeter) return;
+    port.__zcpMeter = true;
     // 关键：只注册监听，**绝不调用 port.start()**
     // start() 会让消息只派发给"启用瞬间"的监听器，从而吃掉应用的 Initialize 握手。
     // 交给应用 start；届时所有已注册监听器（含我们）同时收到消息。
     port.addEventListener("message", (ev) => handleFrame(ev.data));
-    window.__ztpsPort = port;   // 调试用
+    window.__zcpMeterPort = port;   // 调试用
     if (diag) {
       diag.portHooked = true;
       diag.portStarted = false;   // 恒为 false —— 本版本刻意不 start
@@ -1194,17 +1194,17 @@
     }
   }, true);
 
-  window.__ztpsTurns = turns;
-  window.__ztpsHook = hookPort;   // 调试用：热注入时可对存量端口手动补挂
+  window.__zcpMeterTurns = turns;
+  window.__zcpMeterHook = hookPort;   // 调试用：热注入时可对存量端口手动补挂
   // 自检：加载 5s 后若仍未接管端口，把诊断信息打到 console（便于版本升级后排障）
   setTimeout(() => {
     if (diag) {
       diag.portInjectedAt = diag.portInjectedAt || null;
       diag.diagReady = true;
       if (!diag.portHooked) {
-        console.warn("[zcode-tps] 未接管到服务端口，统计将不可用。window.__ztpsDiag =", diag);
+        console.warn("[zcode-tps] 未接管到服务端口，统计将不可用。window.__zcpMeterDiag =", diag);
       } else {
-        console.info("[zcode-tps] 已接管端口，window.__ztpsDiag =", diag);
+        console.info("[zcode-tps] 已接管端口，window.__zcpMeterDiag =", diag);
       }
     }
   }, 5000);

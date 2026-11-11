@@ -5,7 +5,7 @@
 ## 1. 模型拉取前端脚本（MIT License）
 
 - 文件：`skills/zcode-pilot/scripts/zcode-model-puller.js`
-- 同一项目的配置同步逻辑被移植到 `skills/zcode-pilot/scripts/model_pull.py`（命令行版）
+- 同一项目的配置同步逻辑被移植到 `skills/zcode-pilot/scripts/zcp_modelpull.py`（命令行版）
 
 ```
 MIT License

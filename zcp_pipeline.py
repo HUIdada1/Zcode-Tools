@@ -5,9 +5,9 @@
 一条命令、零人工干预地跑完：
     环境自检 → 自动安装依赖 → 自动构建 → 自动测试 → 自动部署 → 验证 → 汇总报告
 
-与 `bootstrap.py` 的分工：
-  * `bootstrap.py` 是**面向人的交互式引导**（分步输出、可选步骤、给人读的建议）
-  * `autopilot.py` 是**面向无人值守的流水线**（结构化日志、自动重试、自动装依赖、
+与 `zcp_bootstrap.py` 的分工：
+  * `zcp_bootstrap.py` 是**面向人的交互式引导**（分步输出、可选步骤、给人读的建议）
+  * `zcp_pipeline.py` 是**面向无人值守的流水线**（结构化日志、自动重试、自动装依赖、
     自动部署、机器可读的汇总报告 + 明确的退出码）—— 适合 CI 与本机一键跑
 
 设计原则：
@@ -19,11 +19,11 @@
      改 provider_config.json）一律先做备份；`--dry-run` 可全程预演。
 
 典型用法：
-    python autopilot.py                    # 全自动跑通（含部署）
-    python autopilot.py --no-deploy        # 只跑到测试，不碰客户端
-    python autopilot.py --unattended       # 无人值守：不提问、失败即退出（CI 用）
-    python autopilot.py --dry-run          # 预演，不写任何文件
-    python autopilot.py --max-retries 5    # 提高可恢复错误的默认重试次数
+    python zcp_pipeline.py                    # 全自动跑通（含部署）
+    python zcp_pipeline.py --no-deploy        # 只跑到测试，不碰客户端
+    python zcp_pipeline.py --unattended       # 无人值守：不提问、失败即退出（CI 用）
+    python zcp_pipeline.py --dry-run          # 预演，不写任何文件
+    python zcp_pipeline.py --max-retries 5    # 提高可恢复错误的默认重试次数
 
 退出码：
     0   全绿
@@ -61,20 +61,20 @@ TESTS = HERE / "tests"
 LOGDIR = HERE / "logs"
 
 PY_MIN = (3, 10)
-PATCHER = SCRIPTS / "zcode_patcher.py"
-DOCTOR = SCRIPTS / "doctor.py"
-SYNC = SCRIPTS / "sync.py"
-WATCHDOG = SCRIPTS / "apply_after_exit.py"
+PATCHER = SCRIPTS / "zcp_patcher.py"
+DOCTOR = SCRIPTS / "zcp_doctor.py"
+SYNC = SCRIPTS / "zcp_sync.py"
+WATCHDOG = SCRIPTS / "zcp_watchdog.py"
 
 # 必需与可选的 Python 源文件（构建阶段逐个 py_compile）
 REQUIRED_PY_FILES = [
-    SCRIPTS / "zcode_patcher.py",
-    SCRIPTS / "sync.py",
-    SCRIPTS / "doctor.py",
-    SCRIPTS / "apply_after_exit.py",
-    SCRIPTS / "autocontinue_hook.py",          # 自动继续：Stop / UserPromptSubmit hook
-    SCRIPTS / "loopguard.py",                  # 自动继续：循环守卫（独立模块）
-    SCRIPTS / "_console.py",
+    SCRIPTS / "zcp_patcher.py",
+    SCRIPTS / "zcp_sync.py",
+    SCRIPTS / "zcp_doctor.py",
+    SCRIPTS / "zcp_watchdog.py",
+    SCRIPTS / "zcp_hook.py",          # 自动继续：Stop / UserPromptSubmit hook
+    SCRIPTS / "zcp_loopguard.py",                  # 自动继续：循环守卫（独立模块）
+    SCRIPTS / "zcp_console.py",
 ]
 
 # 步骤标识 -> 标题
@@ -115,7 +115,7 @@ _NATIVE_ZCODE_RUNNING = None
 
 
 def _import_run_guard():
-    """从 `zcode_patcher` 借来真正的运行守卫（见 `_zcode_running()` 的说明）。
+    """从 `zcp_patcher` 借来真正的运行守卫（见 `_zcode_running()` 的说明）。
 
     有些测试/CI 场景只把本文件单独放进内存跑，并不在 sys.path 上放 scripts 目录；
     拿不到就老实返回 None，让调用方走兜底，而不是让整个模块 import 失败。
@@ -126,7 +126,7 @@ def _import_run_guard():
     try:
         if str(SCRIPTS) not in sys.path:
             sys.path.insert(0, str(SCRIPTS))
-        from zcode_patcher import zcode_running as _fn      # noqa: PLC0415
+        from zcp_patcher import zcode_running as _fn      # noqa: PLC0415
     except Exception:                                       # noqa: BLE001
         return None
     _NATIVE_ZCODE_RUNNING = _fn
@@ -780,7 +780,7 @@ def step_test(log: Logger, dry_run: bool) -> None:
 def _zcode_running() -> bool:
     """跨平台判断 ZCode 是否在运行。
 
-    ★ 优先复用 `zcode_patcher.zcode_running()` —— 运行守卫是**唯一事实来源**。
+    ★ 优先复用 `zcp_patcher.zcode_running()` —— 运行守卫是**唯一事实来源**。
 
     自己再写一份进程探测看着很无害，但它会和主实现悄悄漂移：
     客户端改了进程名、加了 macOS 的 `.app` 包装、或守卫那边补了「正在退出中」
@@ -815,7 +815,7 @@ def step_deploy(log: Logger, dry_run: bool, *, unattended: bool,
       补丁写入要求 ZCode **已退出**（否则 app.asar 被占用、配置会被回写覆盖），
       但无人值守场景下 ZCode 恰恰**正在运行**。所以：
         * 客户端没跑 → 立即写入，本步完成
-        * 客户端在跑 → **自动挂载退出后看护**（apply_after_exit.py）。
+        * 客户端在跑 → **自动挂载退出后看护**（zcp_watchdog.py）。
           看护会等到 ZCode 退出、自动写入、再把 ZCode 拉起来 —— 全程无需人工。
           此时本步记为「已排期」，并把它移交给 verify 步骤说明。
     """
@@ -826,7 +826,7 @@ def step_deploy(log: Logger, dry_run: bool, *, unattended: bool,
         return
 
     if dry_run:
-        log.info("[dry-run] 将执行：zcode_patcher.py --all")
+        log.info("[dry-run] 将执行：zcp_patcher.py --all")
         return
 
     if _zcode_running():
@@ -834,7 +834,7 @@ def step_deploy(log: Logger, dry_run: bool, *, unattended: bool,
         if not WATCHDOG.exists():
             raise StepFailure(f"缺少看护脚本：{WATCHDOG}", kind=ErrorKind.DEP)
 
-        # 看护的 --want 参数与 sync.py 保持同一套键名
+        # 看护的 --want 参数与 zcp_sync.py 保持同一套键名
         wants = [
             "--want=reasoning_config=on", "--want=usage_chart=on",
             "--want=tps_footer=on",
@@ -994,7 +994,7 @@ def _remedy(result: StepResult) -> str:
         ErrorKind.LOCK: "确保 ZCode 完全退出（Windows 托盘右键退出；macOS 用 Cmd+Q）后重跑",
         ErrorKind.NETWORK: "检查网络或代理设置；CI 环境请确认能访问依赖源",
         ErrorKind.TIMEOUT: "机器较慢或被杀软拖慢，可加大超时或用 --max-retries 提高重试次数",
-        ErrorKind.TRANSIENT: "重跑一次通常即可；持续出现请跑 doctor.py 定位",
+        ErrorKind.TRANSIENT: "重跑一次通常即可；持续出现请跑 zcp_doctor.py 定位",
     }.get(result.kind, "加 --verbose 重跑，日志里有完整堆栈")
 
 
@@ -1019,16 +1019,16 @@ def _exit_code_for(result: StepResult) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        prog="autopilot.py",
+        prog="zcp_pipeline.py",
         description="zcode-pilot（ZCode 工具箱）全自动流水线：环境自检 → 自动装依赖 → 构建 → 测试 → 部署 → 验证",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="示例：\n"
-               "  python autopilot.py                     # 全自动（含部署）\n"
-               "  python autopilot.py --no-deploy         # 只构建 + 测试，不碰客户端\n"
-               "  python autopilot.py --unattended        # 无人值守（CI 用，不提问、失败即退）\n"
-               "  python autopilot.py --dry-run           # 全程预演，不写任何文件\n"
-               "  python autopilot.py --only build,test   # 只跑指定步骤\n"
-               "  python autopilot.py --report out.md     # 额外把汇总写成文件",
+               "  python zcp_pipeline.py                     # 全自动（含部署）\n"
+               "  python zcp_pipeline.py --no-deploy         # 只构建 + 测试，不碰客户端\n"
+               "  python zcp_pipeline.py --unattended        # 无人值守（CI 用，不提问、失败即退）\n"
+               "  python zcp_pipeline.py --dry-run           # 全程预演，不写任何文件\n"
+               "  python zcp_pipeline.py --only build,test   # 只跑指定步骤\n"
+               "  python zcp_pipeline.py --report out.md     # 额外把汇总写成文件",
     )
     ap.add_argument("--only", metavar="STEPS",
                     help=f"只执行指定步骤（逗号分隔）。可选：{','.join(STEPS)}")
@@ -1042,7 +1042,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--max-retries", type=int, default=3, metavar="N",
                     help="可恢复错误（占用/超时/网络）的最大重试次数，默认 3")
     ap.add_argument("--log", metavar="PATH", default=None,
-                    help="日志文件路径（默认 logs/autopilot-<时间戳>.log）")
+                    help="日志文件路径（默认 logs/zcp-pipeline-<时间戳>.log）")
     ap.add_argument("--report", metavar="PATH", default=None,
                     help="额外把汇总报告写到指定文件")
     ap.add_argument("--verbose", action="store_true", help="打印调试细节")
@@ -1082,7 +1082,7 @@ def main() -> int:
 
     # ---- 日志 ----
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    log_path = Path(args.log) if args.log else (LOGDIR / f"autopilot-{stamp}.log")
+    log_path = Path(args.log) if args.log else (LOGDIR / f"zcp-pipeline-{stamp}.log")
     log = Logger(None if args.dry_run else log_path,
                  verbose=args.verbose, echo=not args.quiet)
 
