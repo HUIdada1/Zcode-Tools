@@ -63,6 +63,37 @@
 
 ---
 
+## 📸 界面实拍
+
+> 以下为本机浅色主题实拍；深色主题下同一套界面同样是绿色玻璃质感。
+
+<p align="center">
+  <img src="assets/screenshots/01-composer-autocontinue-tps.png" width="700" alt="输入框：自动继续开关与双框遥测"><br>
+  <sub><b>输入框</b>：「模式切换」右侧是自动继续开关（按会话独立）；下方左右双框实时显示轮/步/速度与总 Token/缓存命中</sub>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/02-enhance-model-picker.png" width="250" alt="增强提示词右键菜单"><br>
+  <sub><b>提示词增强</b>：在输入框旁的按钮上<b>右键</b>，按供应商分组选择润色模型，选中即生效、免重启</sub>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/03-provider-model-pull.png" width="560" alt="供应商设置里的自动拉取模型按钮"><br>
+  <sub><b>一键模型同步</b>：设置 → 供应商 → 模型列表旁的「⚡ 自动拉取模型」</sub>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/04-settings-panel.png" width="900" alt="设置页 ZCode 工具箱面板"><br>
+  <sub><b>设置 → 扩展 → 「ZCode 工具箱」</b>：默认模式、宽限期、冷却、最大连发次数与各类继续文本都在这里</sub>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/05-model-sync-dialog.png" width="560" alt="选择要同步的模型弹窗"><br>
+  <sub><b>模型勾选弹窗</b>：搜索、全选 / 清空 / 仅选新模型，确认后一次性写入供应商配置</sub>
+</p>
+
+---
+
 ## 🛠️ 故障排查与一键自愈
 
 > 💡 **0.6.11 自愈机制**：客户端升级会覆盖官方原版文件导致补丁失效。本插件在检测到升级后会自动重新排期看护，**通常只需在会话中收到提示后，完全退出并重启一次 ZCode 即可自动恢复！**
@@ -176,7 +207,8 @@ zcp-run.cmd                        # Windows
 - **适配 3.18.0**：逐项复核注入锚点（`index.html` 单 `</body>`、preload `contextBridge.exposeInMainWorld("zcode"`、main `SaveMcpToUserDirectory`）、渲染层 `data-testid`（`v4-composer*` / `v4-stop` / `v4-model-config` / `chat-mode-select-trigger` / `model-provider-add-model-button`）、DOM 契约（`data-workspace-conversation-frame` / `data-session-id` / `data-turn-id` / `data-settings-*`）与 `usage.delta`、`turnHeader` 等遥测字段，全部命中后重新注入；用量图两条补丁在 3.18.0 的 chunk 上按弹性正则正常落位；
 - **脚本改名（zcp 前缀）**：`sync.py → zcp_sync.py`、`doctor.py → zcp_doctor.py`、`apply_after_exit.py → zcp_watchdog.py`、`autocontinue_hook.py → zcp_hook.py`、`zcode_patcher.py → zcp_patcher.py`、`_console.py → zcp_console.py` 等 12 个脚本，外加仓根 `zcp_bootstrap.py` / `zcp_pipeline.py` / `zcp-run.sh` / `zcp-run.cmd`；`sync.py`、`doctor.py` 保留转发壳，保证 0.8.x 的旧看护在插件更新当次仍能用新版脚本重注入；
 - **变量名去重**：注入脚本挂到渲染层的全局统一改为 `__zcpMeter*` / `__zcpPolish*` / `__zcpCore*`，模型拉取样式前缀 `zcode-pull-*` 改为 `zcp-pull-*`，避免与其他 ZCode 增强插件撞名；
-- **自动再注入边界写进文档**：客户端升级 → 下次 `SessionStart` 识别指纹 → 完全退出一次由看护写入，并明确「别手动抢跑」与「结构变更需更新插件」两条前提（详见上文）。
+- **自动再注入边界写进文档**：客户端升级 → 下次 `SessionStart` 识别指纹 → 完全退出一次由看护写入，并明确「别手动抢跑」与「结构变更需更新插件」两条前提（详见上文）；
+- **README 界面实拍**：补入输入框双框遥测、润色模型菜单、模型拉取、设置面板与勾选弹窗五张实拍（`assets/screenshots/`）。
 
 #### 0.8.2（重注入被提前打开打断时不再静默 + 退出确认）
 - **写入窗口保护**：看护判定「客户端已退出」后再观察 2 秒，确认不是「更新器正在重启」才写盘；避免把重启误判为退出、白白消耗一轮并被预检拒绝；
