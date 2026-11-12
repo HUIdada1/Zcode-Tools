@@ -54,7 +54,7 @@ python "<skill目录>/scripts/zcp_doctor.py" --where  # 只查「插件装在哪
 
 补丁会随 ZCode 升级失效或过时，先确认目标版本，再决定打哪个：
 
-| 补丁 | 3.11.2 及更早 | 3.14.x ~ 3.18.x（实测 3.14.1 / 3.14.3 / 3.15.1 / 3.17.2 / 3.18.0） |
+| 补丁 | 3.11.2 及更早 | 3.14.x ~ 3.18.x（实测 3.14.1 / 3.14.3 / 3.15.1 / 3.17.2 / 3.18.0 / 3.18.1） |
 |---|---|---|
 | ① 思考档位透传（内核补丁） | 需要，走 `providerOptionsByLevel` 兜底 | **已过时**：内核机制整体重写（`providerOptionsByLevel` 只剩 schema 定义，`variants/defaultVariant` 已从内核消失），锚点与结构提取都失效。脚本会提示「原生档位机制，本补丁不适用」 |
 | ①′ 档位配置 `--reasoning-config` | 不需要（用 ①） | **需要**：把档位写进 `provider_config.json` 的 `providerModelRules[].config.optionSpecs.reasoningLevel`（`values` = 界面档位、末位即默认；`map` = CEL，内核发请求前求值并合并进请求体；支持 `maxOutputTokens`）。无需内核补丁 |
@@ -395,6 +395,7 @@ python zcp_pipeline.py --max-retries 5                  # 提高可恢复错误�
 ZCode 升级会覆盖 zcode.cjs 与 app.asar，升级后过一遍（**先完全退出 ZCode**；`--check` 不受此限）：
 
 ```bash
+python tools/check_client_contract.py            # 第 0 步：一条命令判定结构契约是否还在（只读）
 python zcp_patcher.py --check                    # 思考等级：3.14+ 会提示"不需要本补丁"
 python zcp_patcher.py --reasoning-config --check # 档位配置（3.14+ 看这个）
 python zcp_patcher.py --usage-chart --check
@@ -403,6 +404,12 @@ python zcp_patcher.py --auto-continue --check
 python zcp_patcher.py --model-puller --check
 python zcp_patcher.py --enhance-prompt --check
 ```
+
+`check_client_contract.py` 核对的是**客户端结构契约**（三条注入锚点、渲染层 `data-testid`、
+DOM 属性、遥测字段，含从注入脚本自动提取的部分）：全命中即说明本插件可直接重注入，退出码 0；
+报缺失（退出码 1）才需要重新提取锚点/改选择器。**它不判断补丁打没打**，那仍归 `--check`。
+整包 370MB+，两条纪律：不要在整包字节上跑带 `\w+` 的正则（分钟级开销，改用固定子串 +
+邻近窗口）；不要把短混淆名（如历史兜底 `Goe`）当契约（必然假命中，本工具设 6 字符门槛）。
 
 失配的按「自助使用流程」重打；思考等级补丁在 ≤3.11 新内核上先 `--extract` 确认锚点可提取。
 重打包级补丁（状态栏/自动继续/拉取按钮）被升级覆盖后直接重跑即可——旧备份会被自动归档，不会误还原。

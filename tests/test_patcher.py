@@ -89,7 +89,7 @@ def quiet(fn, *a, **kw):
 
 
 @contextlib.contextmanager
-def patcher_stubbed(zcp_sync, states=None, verdicts=None, legacy=False):
+def patcher_stubbed(zcp_sync, states=None, verdicts=None, legacy=False, reinject=None):
     """把 zcp_sync 里会真正碰客户端的地方换成记录桩，并返回调用记录列表。
 
     **单元测试绝不能真的跑 zcp_patcher.py** —— 那会按当前开关改写本机的 app.asar，
@@ -104,6 +104,15 @@ def patcher_stubbed(zcp_sync, states=None, verdicts=None, legacy=False):
     历史滑条残留」会让断言随机器漂移（有残留就多出一个 watchdog 的 cleanup_legacy 键）。
     需要覆盖残留路径的用例显式传 legacy=True。
 
+    `read_reinject_pending` 同理：它直接读全局 `PENDING_FILE`（本机
+    `~/.zcode/pilot/reinject.pending`）。那是「上次退出写入被客户端抢跑打断」的留痕，
+    真实存在时 `main(--detach)` 会**额外** emit 一条提示 —— 于是「提示只出一次」这类
+    断言在开发机上随写没写入而漂移（实测 2026-11-12 客户端升级后留下 pending，
+    `test_detach_emits_notice_only_on_the_first_session` 就因此第二次仍拿到输出）。
+    默认桩返回 `{}`；要覆盖这条链路显式传 reinject={"keys": [...]}。
+    真读真写 pending 的用例见 `tests/test_plugin_update.py::ReinjectPendingCase`
+    （它自己把 `PENDING_FILE` 指到临时目录，不走本桩）。
+
     调用记录形如 ("run", ("--usage-chart",), False) / ("watchdog", {"tps_footer": True})。
     """
     table = states or {}
@@ -111,6 +120,7 @@ def patcher_stubbed(zcp_sync, states=None, verdicts=None, legacy=False):
     calls = []
     orig = (zcp_sync.check_state, zcp_sync.run_patcher, zcp_sync.start_watchdog,
             zcp_sync.legacy_cleanup_needed, zcp_sync.plugin_update_pending,
+            zcp_sync.read_reinject_pending,
             zcp_sync.write_inject_record, zcp_sync.mark_reinject_pending,
             zcp_sync.clear_reinject_pending)
     zcp_sync.check_state = lambda args: table.get(tuple(args), "on")
@@ -121,6 +131,7 @@ def patcher_stubbed(zcp_sync, states=None, verdicts=None, legacy=False):
     zcp_sync.legacy_cleanup_needed = lambda: bool(legacy)
     # 插件市场更新判定会读本机真实的市场登记表/注入记录：不打桩会让断言随开发机漂移。
     zcp_sync.plugin_update_pending = lambda: {}
+    zcp_sync.read_reinject_pending = lambda: dict(reinject) if reinject else {}
     zcp_sync.write_inject_record = lambda *a, **kw: None
     zcp_sync.mark_reinject_pending = lambda keys: None
     zcp_sync.clear_reinject_pending = lambda: None
@@ -129,6 +140,7 @@ def patcher_stubbed(zcp_sync, states=None, verdicts=None, legacy=False):
     finally:
         (zcp_sync.check_state, zcp_sync.run_patcher, zcp_sync.start_watchdog,
          zcp_sync.legacy_cleanup_needed, zcp_sync.plugin_update_pending,
+         zcp_sync.read_reinject_pending,
          zcp_sync.write_inject_record, zcp_sync.mark_reinject_pending,
          zcp_sync.clear_reinject_pending) = orig
 

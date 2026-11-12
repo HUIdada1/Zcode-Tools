@@ -1,7 +1,7 @@
 # zcode-pilot · ZCode 客户端一站式原生增强套件
 
 <p align="left">
-  <a href="https://github.com/HUIdada1/Zcode-Tools/releases"><img src="https://img.shields.io/badge/version-0.9.0-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/HUIdada1/Zcode-Tools/releases"><img src="https://img.shields.io/badge/version-0.9.1-blue.svg?style=flat-square" alt="Version"></a>
   <img src="https://img.shields.io/badge/python-3.10+-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/dependencies-0%20(std%20only)-success.svg?style=flat-square" alt="Dependencies">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg?style=flat-square" alt="Platform">
@@ -30,7 +30,7 @@
 
 | 步骤 | 操作说明 |
 |:---:|---|
-| **1. 环境确认** | 确认电脑已安装 **Python 3.10+**（系统自带或环境变量已配置）及 **ZCode 客户端**（实测支持 3.11.2 ~ 3.18.0，当前验证 3.18.0） |
+| **1. 环境确认** | 确认电脑已安装 **Python 3.10+**（系统自带或环境变量已配置）及 **ZCode 客户端**（实测支持 3.11.2 ~ 3.18.1，当前验证 3.18.1） |
 | **2. 添加市场** | 打开 ZCode **设置 → 插件 → 右上角「创建」→「添加插件市场」**，来源填：<br>`HUIdada1/Zcode-Tools` |
 | **3. 安装插件** | 在「个人」分段找到 **ZCode 原生体验增强**（`ZCode Pilot`），点 **安装**（装好默认启用） |
 | **4. 自动激活** | **完全退出并重启 ZCode**（托盘右键退出），在新会话中发任意一条消息，后台看护进程将自动完成注入并在下次启动后展现全部增强功能！ |
@@ -42,7 +42,7 @@
 > 🧬 **客户端自己升级了，也会自动再注入**：ZCode 升级会整体覆盖 `app.asar`，注入的界面随即消失；插件在**下一次会话启动**时用客户端指纹（版本号 + asar 大小）识别出这次升级，自动把全部补丁重新排给后台看护，你只需要**完全退出一次**（托盘右键 → 退出），看护在退出瞬间写入并自动拉起客户端。三条边界要清楚：
 > 1. **必须先有一次会话启动** —— `SessionStart` 是官方规范里最早的自动触发点（插件清单没有「安装时钩子」）；
 > 2. **退出后不要手动抢跑** —— 写入约 10–60 秒，期间手动打开 ZCode 会让写入被拒绝，只能再退一次；
-> 3. **新客户端若改了 asar 结构**，脚本会按设计「拒绝盲改」并在会话里明确提示，这时才需要更新插件（本版本就是为 3.18.0 做的适配）。
+> 3. **新客户端若改了 asar 结构**，脚本会按设计「拒绝盲改」并在会话里明确提示，这时才需要更新插件（0.9.0 / 0.9.1 就是分别为 3.18.0 / 3.18.1 做的适配复核）。
 
 ---
 
@@ -178,7 +178,7 @@ python skills/zcode-pilot/scripts/zcp_patcher.py --tps-footer --revert
 ```bash
 python zcp_bootstrap.py            # macOS/Linux 使用 python3 zcp_bootstrap.py
 ```
-自动执行平台环境校验、标准库检查、语法构建与 280+ 项回归测试。
+自动执行平台环境校验、标准库检查、语法构建与 498 项回归测试。
 
 ### 方式 E：全自动流水线
 ```bash
@@ -202,6 +202,12 @@ zcp-run.cmd                        # Windows
 
 <details>
 <summary><b>📜 历史版本审计与故障排查记录</b></summary>
+
+#### 0.9.1（适配 ZCode 3.18.1）
+- **适配 3.18.1**：实测客户端 `3.18.1.10376`。三条注入锚点（`index.html` 唯一 `</body>`、preload `contextBridge.exposeInMainWorld("zcode",{`、main `.handle(‹X›.SaveMcpToUserDirectory`）、渲染层 `data-testid`（`v4-composer*` / `v4-stop` / `v4-model-config` / `chat-mode-select-trigger` / `model-provider-add-model-button`）、DOM 契约（`data-workspace-conversation-frame` / `data-session-id` / `data-turn-id` / `data-settings-*`）与 `usage.delta`、`turnHeader`、`modelDurationMs`、`cacheReadTokens` 等 12 项遥测字段**全部命中，补丁逻辑零改动**；八项补丁在 3.18.1 上重注入全部成功，重打包后 asar 结构自洽（31,948 个条目，越界 0 / 重叠 0），客户端启动链路无 error/fatal；
+- **新增 `tools/check_client_contract.py`（只读契约核对）**：客户端一改版先跑它，一条命令判定「本插件能否直接重注入」（退出码 0 可 / 1 需重新提取锚点 / 3 定位不到安装）。契约 = 手写核心清单 + 从四个注入脚本**自动提取**的 test-id 与 DOM 属性，并自动剔除插件自己写到 DOM 上的 `data-zpilot*` / `data-zps*` / `data-ztps*` / `data-zenhance*`（否则未打补丁时必然假失配）。它只管结构契约，补丁打没打仍归 `zcp_patcher.py --check`。两条实测纪律写进了脚本注释：整包 370MB+ **不要跑带 `\w+` 的正则**（单次分钟级，换成固定子串 + 邻近窗口后全程 6.5 秒）；短混淆名（如历史兜底选择器 `Goe`）不能当契约（在整包里必然假命中，故设 6 字符门槛）；
+- **修复一处测试隔离缺陷**：`patcher_stubbed` 打桩了 `plugin_update_pending` / `mark_reinject_pending` / `clear_reinject_pending`，唯独漏了 `read_reinject_pending`，于是 `test_detach_emits_notice_only_on_the_first_session` 会读到**本机真实**的 `~/.zcode/pilot/reinject.pending`（客户端升级时写入被打断留下的留痕），把「提示只出一次」判成失败 —— 498 项里只有这一条随开发机状态漂移。现在默认返回 `{}`，需要覆盖该链路显式传 `reinject={...}`；真读真写的用例仍由 `tests/test_plugin_update.py::ReinjectPendingCase` 自己重定向 `PENDING_FILE` 负责；
+- **文档同步**：支持范围更新至 3.11.2 ~ 3.18.1；`SKILL.md` 版本现状表补入 3.18.1，「升级后自查清单」新增第 0 步（先跑契约核对）；方式 D 的回归测试数量据实修正为 498 项。
 
 #### 0.9.0（适配 ZCode 3.18.0 + 脚本/变量改名 zcp 前缀）
 - **适配 3.18.0**：逐项复核注入锚点（`index.html` 单 `</body>`、preload `contextBridge.exposeInMainWorld("zcode"`、main `SaveMcpToUserDirectory`）、渲染层 `data-testid`（`v4-composer*` / `v4-stop` / `v4-model-config` / `chat-mode-select-trigger` / `model-provider-add-model-button`）、DOM 契约（`data-workspace-conversation-frame` / `data-session-id` / `data-turn-id` / `data-settings-*`）与 `usage.delta`、`turnHeader` 等遥测字段，全部命中后重新注入；用量图两条补丁在 3.18.0 的 chunk 上按弹性正则正常落位；
