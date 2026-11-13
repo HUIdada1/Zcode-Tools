@@ -652,6 +652,74 @@ def legacy_cleanup_needed() -> bool:
     return "历史滑条残留: 有" in out
 
 
+#: Windows：看护启动用的计划任务名。任务定义只是「借道」——拉起看护后立即删除，
+#: 不留任何计划残留（实测删除定义不影响已在运行的实例）。
+WATCHDOG_TASK_NAME = "zcode-pilot-watchdog"
+#: 临时 ps1 落盘位置（~/.zcode/pilot/ 下，用完即删）。放状态目录而不是 %TEMP%，
+#: 是为了与看护的其他产物同生命周期，异常退出时 doctor 也看得到。
+WATCHDOG_TASK_PS1 = WATCHDOG_DIR / "_zcp_watchdog_task.ps1"
+
+
+def _psq(s) -> str:
+    """PowerShell 单引号字符串的字面量转义（' → ''）。"""
+    return str(s).replace("'", "''")
+
+
+def _launch_watchdog_via_task(args: list) -> bool:
+    """经 Windows 计划任务在 ZCode 进程树之外启动看护；成功返回 True。
+
+    为什么必须树外（2026-11-12/13 实测故障的根因修复）：看护由 SessionStart 钩子
+    拉起，是 ZCode.exe → zcode-runtime-host.exe → shell → python 的**后代**；托盘
+    「退出」时客户端会把整个后代进程树一起收掉。DETACHED_PROCESS 只脱控制台、
+    不脱树，于是看护在观测到「ZCode 已退出」之前就死了 —— 日志里只有「启动待命」
+    一行、连失败记录都没有，用户看到的就是「按提示退出了，但什么都没注入」，
+    而且无论重退多少次都一样（每次的新看护仍挂在树上）。历史上 5 次成功写入全是
+    「等待 0s」场景 —— 看护启动时客户端本来就没在跑，恰好绕开了连坐，才掩盖到这里。
+
+    计划任务的进程由 Task Scheduler 服务（svchost）派生，父链与 ZCode 完全无关；
+    pythonw.exe 启动则无控制台窗口。任何一步失败（组策略禁用计划任务 / 无 PowerShell）
+    都只返回 False，由调用方降级回老的 Popen 方式。
+    """
+    runner = Path(sys.executable).with_name("pythonw.exe")
+    if not runner.is_file():                     # 精简安装没有 pythonw：退回 python.exe，
+        runner = Path(sys.executable)            # 配合 -Hidden 也不会弹控制台窗
+    argline = f'"{WATCHDOG}" ' + " ".join(args)
+    script = "\n".join([
+        "$ErrorActionPreference = 'Stop'",
+        "$action = New-ScheduledTaskAction -Execute '{}' -Argument '{}' -WorkingDirectory '{}'".format(
+            _psq(runner), _psq(argline), _psq(HERE)),
+        "$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddHours(8)",
+        "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries "
+        "-DontStopIfGoingOnBatteries -StartWhenAvailable -Hidden -MultipleInstances IgnoreNew",
+        f"Register-ScheduledTask -TaskName '{_psq(WATCHDOG_TASK_NAME)}' "
+        "-Action $action -Trigger $trigger -Settings $settings -Force | Out-Null",
+        f"Start-ScheduledTask -TaskName '{_psq(WATCHDOG_TASK_NAME)}'",
+        "Start-Sleep -Seconds 2",
+        f"Unregister-ScheduledTask -TaskName '{_psq(WATCHDOG_TASK_NAME)}' -Confirm:$false",
+        "Write-Output 'TASK_OK'",
+    ])
+    try:
+        WATCHDOG_DIR.mkdir(parents=True, exist_ok=True)
+        WATCHDOG_TASK_PS1.write_text(script, encoding="utf-8")
+        r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                            "-File", str(WATCHDOG_TASK_PS1)],
+                           capture_output=True, encoding="utf-8", errors="replace",
+                           timeout=90, **no_window_kwargs())
+        if r.returncode == 0 and "TASK_OK" in (r.stdout or ""):
+            return True
+        log(f"计划任务启动看护未成功（rc={r.returncode}）："
+            f"{(r.stderr or r.stdout or '').strip()[:200]}")
+        return False
+    except Exception as exc:
+        log(f"计划任务启动看护异常：{exc!r}")
+        return False
+    finally:
+        try:
+            WATCHDOG_TASK_PS1.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def start_watchdog(wanted: dict) -> None:
     """启动退出后看护：等 ZCode 退出 → 应用重打包级补丁；顺带盯紧插件市场更新。
 
@@ -698,15 +766,26 @@ def start_watchdog(wanted: dict) -> None:
 
     args = ["--watch-plugin-update"]
     args += [f"--want={k}={'on' if v else 'off'}" for k, v in wanted.items()]
-    kw = {"cwd": str(HERE), "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    way = ""
     if os.name == "nt":
-        kw["creationflags"] = DETACHED_PROCESS | CREATE_NO_WINDOW
-    else:
-        # POSIX：自成会话组（与 spawn_detached 同一做法），否则看护留在钩子的
-        # 进程组里，应用退出/清理时可能被整组信号连带杀掉。
-        kw["start_new_session"] = True
-    subprocess.Popen([sys.executable, str(WATCHDOG), *args], **kw)  # no-window-ok: kw 已按平台携带 DETACHED_PROCESS|CREATE_NO_WINDOW（Windows）/ start_new_session（POSIX）
-    log(f"已启动退出后看护: {' '.join(args)}")
+        # Windows：优先经计划任务把看护放到 ZCode 进程树之外，理由与实测故障见
+        # _launch_watchdog_via_task 的 docstring（树内看护会被客户端退出连坐绞杀）。
+        if _launch_watchdog_via_task(args):
+            way = "计划任务·树外"
+    if not way:
+        kw = {"cwd": str(HERE), "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+        if os.name == "nt":
+            # 降级路径：计划任务被组策略禁用 / PowerShell 不可用时至少让看护起来；
+            # 但要清楚——这种起法仍挂在客户端进程树上，客户端重启大概率打断写入。
+            kw["creationflags"] = DETACHED_PROCESS | CREATE_NO_WINDOW
+            way = "Popen·树内（计划任务不可用，客户端若被重启写入可能被打断）"
+        else:
+            # POSIX：自成会话组（与 spawn_detached 同一做法），否则看护留在钩子的
+            # 进程组里，应用退出/清理时可能被整组信号连带杀掉。
+            kw["start_new_session"] = True
+            way = "新会话组"
+        subprocess.Popen([sys.executable, str(WATCHDOG), *args], **kw)  # no-window-ok: kw 已按平台携带 DETACHED_PROCESS|CREATE_NO_WINDOW（Windows）/ start_new_session（POSIX）
+    log(f"已启动退出后看护（{way}）: {' '.join(args)}")
 
 
 def resolve_wanted() -> tuple[dict, str]:

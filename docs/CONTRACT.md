@@ -11,7 +11,7 @@
 | 显示名（marketplace `displayName`） | `ZCode Pilot` |
 | 中文显示名 | `ZCode 工具箱` |
 | 技能目录 | `skills/zcode-pilot/` |
-| 版本 | `0.9.1` |
+| 版本 | `0.9.2` |
 | 仓库名 / 市场名 | 仓库为 `Zcode-Tools`（GitHub：`HUIdada1/Zcode-Tools`），**市场 id 与插件同名 = `zcode-pilot`**：本插件从旧市场里独立出来，配置键为 `zcode-pilot@zcode-pilot` |
 | 图标 | `assets/icon.png` / `assets/banner.png`（由 `tools/make_logo.py` 生成） |
 

@@ -1,7 +1,7 @@
 # zcode-pilot · ZCode 客户端一站式原生增强套件
 
 <p align="left">
-  <a href="https://github.com/HUIdada1/Zcode-Tools/releases"><img src="https://img.shields.io/badge/version-0.9.1-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/HUIdada1/Zcode-Tools/releases"><img src="https://img.shields.io/badge/version-0.9.2-blue.svg?style=flat-square" alt="Version"></a>
   <img src="https://img.shields.io/badge/python-3.10+-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/dependencies-0%20(std%20only)-success.svg?style=flat-square" alt="Dependencies">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg?style=flat-square" alt="Platform">
@@ -30,7 +30,7 @@
 
 | 步骤 | 操作说明 |
 |:---:|---|
-| **1. 环境确认** | 确认电脑已安装 **Python 3.10+**（系统自带或环境变量已配置）及 **ZCode 客户端**（实测支持 3.11.2 ~ 3.18.1，当前验证 3.18.1） |
+| **1. 环境确认** | 确认电脑已安装 **Python 3.10+**（系统自带或环境变量已配置）及 **ZCode 客户端**（实测支持 3.11.2 ~ 3.18.2，当前验证 3.18.2） |
 | **2. 添加市场** | 打开 ZCode **设置 → 插件 → 右上角「创建」→「添加插件市场」**，来源填：<br>`HUIdada1/Zcode-Tools` |
 | **3. 安装插件** | 在「个人」分段找到 **ZCode 原生体验增强**（`ZCode Pilot`），点 **安装**（装好默认启用） |
 | **4. 自动激活** | **完全退出并重启 ZCode**（托盘右键退出），在新会话中发任意一条消息，后台看护进程将自动完成注入并在下次启动后展现全部增强功能！ |
@@ -42,7 +42,7 @@
 > 🧬 **客户端自己升级了，也会自动再注入**：ZCode 升级会整体覆盖 `app.asar`，注入的界面随即消失；插件在**下一次会话启动**时用客户端指纹（版本号 + asar 大小）识别出这次升级，自动把全部补丁重新排给后台看护，你只需要**完全退出一次**（托盘右键 → 退出），看护在退出瞬间写入并自动拉起客户端。三条边界要清楚：
 > 1. **必须先有一次会话启动** —— `SessionStart` 是官方规范里最早的自动触发点（插件清单没有「安装时钩子」）；
 > 2. **退出后不要手动抢跑** —— 写入约 10–60 秒，期间手动打开 ZCode 会让写入被拒绝，只能再退一次；
-> 3. **新客户端若改了 asar 结构**，脚本会按设计「拒绝盲改」并在会话里明确提示，这时才需要更新插件（0.9.0 / 0.9.1 就是分别为 3.18.0 / 3.18.1 做的适配复核）。
+> 3. **新客户端若改了 asar 结构**，脚本会按设计「拒绝盲改」并在会话里明确提示，这时才需要更新插件（0.9.0 / 0.9.1 / 0.9.2 已分别复核 3.18.0 / 3.18.1 / 3.18.2 契约）。
 
 ---
 
@@ -178,7 +178,7 @@ python skills/zcode-pilot/scripts/zcp_patcher.py --tps-footer --revert
 ```bash
 python zcp_bootstrap.py            # macOS/Linux 使用 python3 zcp_bootstrap.py
 ```
-自动执行平台环境校验、标准库检查、语法构建与 498 项回归测试。
+自动执行平台环境校验、标准库检查、语法构建与 507 项回归测试。
 
 ### 方式 E：全自动流水线
 ```bash
@@ -202,6 +202,12 @@ zcp-run.cmd                        # Windows
 
 <details>
 <summary><b>📜 历史版本审计与故障排查记录</b></summary>
+
+#### 0.9.2（修复：Windows 看护被客户端退出「连坐」绞杀，重注入永远不落地）
+- **根因**：看护由 SessionStart 钩子直接 `Popen` 拉起，是 `ZCode.exe → zcode-runtime-host.exe → shell → python` 的**后代进程**；托盘「退出」时客户端会把整棵后代进程树一起收掉。`DETACHED_PROCESS` 只脱控制台、**不脱进程树**，于是看护在观测到「ZCode 已退出」的前一秒就被绞杀 —— 日志里只有「启动待命」一行、连失败记录都没有，用户看到的现象是「按提示完全退出了，但什么都没注入」，且**无论重退多少次都复现**（每一代新看护仍挂在树上）。2026-11-12/13 实测两代看护（PID 22448 / 20500）均无声消失；历史 5 次成功写入全是「等待 0s」场景（看护启动时客户端本来就没在跑，恰好绕开连坐），所以该缺陷一直没在日志里露头；
+- **修复**：Windows 上看护改由**系统计划任务**启动 —— 经 Task Scheduler 服务（`svchost`）派生，父链与 ZCode 完全无关；流程「注册 → 立即启动 → 删除任务定义」一气呵成（实测删除定义不影响已运行实例，不留任何计划残留），`pythonw.exe` 起进程无窗口。计划任务被组策略禁用 / 无 PowerShell 时自动降级回原 `Popen` 方式并在日志注明「树内」，同步日志行现为 `已启动退出后看护（计划任务·树外）: ...`；POSIX 维持 `start_new_session` 不变；
+- **3.18.2 适配复核**：`tools/check_client_contract.py` 实测客户端 3.18.2（384,840,277 字节 asar）契约 **42/42 全部命中**，补丁逻辑零改动；本次故障与客户端结构无关，纯属看护启动方式缺陷；
+- **新增回归测试** `tests/test_watchdog_launch.py`（9 项）：锁死「计划任务成功则不走 Popen」「任务失败必降级且留痕」「POSIX 不碰计划任务」「`_launch_watchdog_via_task` 对 rc/输出/异常三类失败只返回 False 绝不上抛（钩子路径上任何异常都会拖垮会话启动）」「ps1 单引号转义」；全量回归 507 项通过。
 
 #### 0.9.1（适配 ZCode 3.18.1）
 - **适配 3.18.1**：实测客户端 `3.18.1.10376`。三条注入锚点（`index.html` 唯一 `</body>`、preload `contextBridge.exposeInMainWorld("zcode",{`、main `.handle(‹X›.SaveMcpToUserDirectory`）、渲染层 `data-testid`（`v4-composer*` / `v4-stop` / `v4-model-config` / `chat-mode-select-trigger` / `model-provider-add-model-button`）、DOM 契约（`data-workspace-conversation-frame` / `data-session-id` / `data-turn-id` / `data-settings-*`）与 `usage.delta`、`turnHeader`、`modelDurationMs`、`cacheReadTokens` 等 12 项遥测字段**全部命中，补丁逻辑零改动**；八项补丁在 3.18.1 上重注入全部成功，重打包后 asar 结构自洽（31,948 个条目，越界 0 / 重叠 0），客户端启动链路无 error/fatal；

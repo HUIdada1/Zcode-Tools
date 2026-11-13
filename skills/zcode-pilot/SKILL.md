@@ -46,6 +46,15 @@ python "<skill目录>/scripts/zcp_doctor.py" --where  # 只查「插件装在哪
 
 ## 版本现状（动手前先看）
 
+> **0.9.2 Windows 看护改经计划任务在 ZCode 进程树之外启动**：此前看护由 SessionStart 钩子直接
+> `Popen`，是 `ZCode.exe → zcode-runtime-host.exe → shell → python` 的后代；托盘「退出」会连根收掉
+> 整棵后代树，而 `DETACHED_PROCESS` 只脱控制台不脱树 —— 看护在观测到退出前就被绞杀，表现为
+> 「用户按提示退出了，但日志里只有『启动待命』一行、没有任何写入记录」，且重退多少次都一样。
+> 现在 Windows 走 Task Scheduler 派生（父进程 `svchost`，与 ZCode 无关）：注册 → 启动 → 立即删任务
+> 定义（不影响已运行实例、不留计划残留）；计划任务被组策略禁用 / 无 PowerShell 时自动降级回
+> `Popen` 并在日志标注「树内」。同步日志成功形态：`已启动退出后看护（计划任务·树外）: ...`。
+> 排查时若看到「（Popen·树内…」，说明该机器上计划任务不可用，客户端被重启时写入大概率被打断。
+
 > **0.9.0 脚本改名**：脚本统一 `zcp_` 前缀 —— `zcp_patcher.py` / `zcp_sync.py` / `zcp_watchdog.py` /
 > `zcp_doctor.py` / `zcp_hook.py` / `zcp_loopguard.py` / `zcp_modelpull.py` / `zcp_console.py` 等；
 > 仓根为 `zcp_bootstrap.py` / `zcp_pipeline.py` / `zcp-run.sh` / `zcp-run.cmd`。
@@ -54,7 +63,7 @@ python "<skill目录>/scripts/zcp_doctor.py" --where  # 只查「插件装在哪
 
 补丁会随 ZCode 升级失效或过时，先确认目标版本，再决定打哪个：
 
-| 补丁 | 3.11.2 及更早 | 3.14.x ~ 3.18.x（实测 3.14.1 / 3.14.3 / 3.15.1 / 3.17.2 / 3.18.0 / 3.18.1） |
+| 补丁 | 3.11.2 及更早 | 3.14.x ~ 3.18.x（实测 3.14.1 / 3.14.3 / 3.15.1 / 3.17.2 / 3.18.0 / 3.18.1 / 3.18.2） |
 |---|---|---|
 | ① 思考档位透传（内核补丁） | 需要，走 `providerOptionsByLevel` 兜底 | **已过时**：内核机制整体重写（`providerOptionsByLevel` 只剩 schema 定义，`variants/defaultVariant` 已从内核消失），锚点与结构提取都失效。脚本会提示「原生档位机制，本补丁不适用」 |
 | ①′ 档位配置 `--reasoning-config` | 不需要（用 ①） | **需要**：把档位写进 `provider_config.json` 的 `providerModelRules[].config.optionSpecs.reasoningLevel`（`values` = 界面档位、末位即默认；`map` = CEL，内核发请求前求值并合并进请求体；支持 `maxOutputTokens`）。无需内核补丁 |
@@ -225,7 +234,7 @@ python "<skill目录>/scripts/zcp_doctor.py" --where  # 只查「插件装在哪
 
 ### 退出后自动注入
 
-重打包级补丁（TPS 状态栏、拉取按钮）要求 ZCode **完全退出**。插件里由 `scripts/zcp_watchdog.py` 承担：轮询等 ZCode 退出 → 按期望状态应用/还原 → 写日志。它由开关同步（`zcp_sync.py`）在检测到重打包级差异时自动拉起，平时不运行，**不需要常驻服务**。
+重打包级补丁（TPS 状态栏、拉取按钮）要求 ZCode **完全退出**。插件里由 `scripts/zcp_watchdog.py` 承担：轮询等 ZCode 退出 → 按期望状态应用/还原 → 写日志。它由开关同步（`zcp_sync.py`）在检测到重打包级差异时自动拉起，平时不运行，**不需要常驻服务**。0.9.2 起 Windows 上的拉起方式是**计划任务（树外）**——看护必须活得比 ZCode 久，而钩子派生的任何直接子进程都会随客户端退出被连坐绞杀（详见「版本现状」0.9.2 条目）。
 
 > **为什么必须等退出（不是「文件被锁」）**：实测用 Win32 `CreateFileW(..., share=0, ...)` 能对
 > `app.asar` 与 `zcode.cjs` 取得独占句柄，ZCode 运行期间**并没有锁住它们**，直接写也能成功。
