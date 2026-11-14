@@ -30,10 +30,11 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 try:                                   # 控制台编码/窗口安全网（见 zcp_console.py 的说明）
@@ -41,6 +42,12 @@ try:                                   # 控制台编码/窗口安全网（见 z
 except ImportError:                    # 被别处 import 时脚本目录可能不在 sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from zcp_console import no_window_kwargs
+
+try:                                   # 单例判定与启动活性确认：统一以看护心跳为准（0.9.3）
+    from zcp_watchdog import live_watchdog_pid, wait_watchdog_alive
+except ImportError:                    # 被别处 import 时脚本目录可能不在 sys.path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from zcp_watchdog import live_watchdog_pid, wait_watchdog_alive
 
 HERE = Path(__file__).resolve().parent
 PATCHER = HERE / "zcp_patcher.py"
@@ -666,7 +673,7 @@ def _psq(s) -> str:
 
 
 def _launch_watchdog_via_task(args: list) -> bool:
-    """经 Windows 计划任务在 ZCode 进程树之外启动看护；成功返回 True。
+    """经 Windows 计划任务在 ZCode 进程树之外启动看护；活性确认后才返回 True。
 
     为什么必须树外（2026-11-12/13 实测故障的根因修复）：看护由 SessionStart 钩子
     拉起，是 ZCode.exe → zcode-runtime-host.exe → shell → python 的**后代**；托盘
@@ -676,10 +683,42 @@ def _launch_watchdog_via_task(args: list) -> bool:
     而且无论重退多少次都一样（每次的新看护仍挂在树上）。历史上 5 次成功写入全是
     「等待 0s」场景 —— 看护启动时客户端本来就没在跑，恰好绕开了连坐，才掩盖到这里。
 
+    0.9.3 改为两段式（别的电脑上「TASK_OK 打了但看护根本没起来，退出后照样什么
+    都没注入」的修复）：
+      阶段1 点火：PowerShell 优先；PowerShell 不可用/被策略拦（受限语言模式等）
+        时退 schtasks.exe —— 同一个 Task Scheduler 服务，绕开对 PowerShell 的依赖。
+      阶段2 活性确认：点火成功 ≠ 进程活着（pythonw 被杀软拦 / Store Python 别名
+        损坏 / 组策略静默拒绝 Start，全都无声无息）。用 wait_watchdog_alive 等心跳
+        现身，等不到按失败处理、交调用方降级 Popen —— 宁可多起一个（心跳单例账本
+        会裁决），绝不能再「以为起来了」却一个都没有。
+
     计划任务的进程由 Task Scheduler 服务（svchost）派生，父链与 ZCode 完全无关；
-    pythonw.exe 启动则无控制台窗口。任何一步失败（组策略禁用计划任务 / 无 PowerShell）
-    都只返回 False，由调用方降级回老的 Popen 方式。
+    pythonw.exe 启动则无控制台窗口。
     """
+    if not _fire_watchdog_task(args):
+        return False
+    if wait_watchdog_alive():
+        return True
+    log("计划任务已点火但未见看护心跳（pythonw 可能被拦/启动失败），按失败处理，走下一级兜底")
+    return False
+
+
+def _fire_watchdog_task(args: list) -> bool:
+    """只负责点火（不确认活性）：PowerShell 优先，schtasks.exe 兜底。"""
+    if _fire_watchdog_task_ps(args):
+        return True
+    log("PowerShell 点火未成功，改试 schtasks.exe（同一 Task Scheduler 服务，无 PS 依赖）")
+    return _fire_watchdog_task_schtasks(args)
+
+
+def _fire_watchdog_task_ps(args: list) -> bool:
+    """PowerShell 点火：注册 → 立即启动 → 删除任务定义一气呵成（不留计划残留）。"""
+    ps = shutil.which("powershell")     # which 已含可执行性校验，结果可能是裸名或全路径
+    if not ps:
+        ps = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+        if not Path(ps).is_file():      # 只有这条硬编码兜底路径才需要存在性复检
+            log("找不到 powershell（PATH 与系统目录都没有）")
+            return False
     runner = Path(sys.executable).with_name("pythonw.exe")
     if not runner.is_file():                     # 精简安装没有 pythonw：退回 python.exe，
         runner = Path(sys.executable)            # 配合 -Hidden 也不会弹控制台窗
@@ -701,7 +740,7 @@ def _launch_watchdog_via_task(args: list) -> bool:
     try:
         WATCHDOG_DIR.mkdir(parents=True, exist_ok=True)
         WATCHDOG_TASK_PS1.write_text(script, encoding="utf-8")
-        r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+        r = subprocess.run([ps, "-NoProfile", "-ExecutionPolicy", "Bypass",
                             "-File", str(WATCHDOG_TASK_PS1)],
                            capture_output=True, encoding="utf-8", errors="replace",
                            timeout=90, **no_window_kwargs())
@@ -720,6 +759,51 @@ def _launch_watchdog_via_task(args: list) -> bool:
             pass
 
 
+def _fire_watchdog_task_schtasks(args: list) -> bool:
+    """schtasks.exe 直接点火：受限语言模式 / PowerShell 被禁环境下的兜底。
+
+    /TR 刻意不带 --want：待办已由 start_watchdog 先写进 watchdog.want、常驻监听
+    标志在 watchdog.watch，看护无参启动就能拿到同一份期望状态；schtasks 的 /TR
+    有 ~261 字符上限，深插件缓存路径 + 全量 --want 会超限。
+    """
+    exe = shutil.which("schtasks")
+    if not exe:
+        log("找不到 schtasks.exe（PATH 与系统目录都没有），无法走计划任务兜底")
+        return False
+    runner = Path(sys.executable).with_name("pythonw.exe")
+    if not runner.is_file():
+        runner = Path(sys.executable)
+    # /SC ONCE 需要 /ST；反正马上手动 /Run，触发时刻只要「像未来」即可。
+    # 跨零点的边缘情况 /Create 可能报错 → 返回 False 降级 Popen，不影响正确性。
+    st = (datetime.now() + timedelta(minutes=2)).strftime("%H:%M")
+    tr = f'"{runner}" "{WATCHDOG}"'
+    try:
+        r = subprocess.run([exe, "/Create", "/F", "/TN", WATCHDOG_TASK_NAME,
+                            "/SC", "ONCE", "/ST", st, "/TR", tr],
+                           capture_output=True, encoding="utf-8", errors="replace",
+                           timeout=30, **no_window_kwargs())
+        if r.returncode != 0:
+            log(f"schtasks /Create 未成功（rc={r.returncode}）："
+                f"{(r.stderr or r.stdout or '').strip()[:200]}")
+            return False
+        r = subprocess.run([exe, "/Run", "/TN", WATCHDOG_TASK_NAME],
+                           capture_output=True, encoding="utf-8", errors="replace",
+                           timeout=30, **no_window_kwargs())
+        ok = r.returncode == 0
+        if not ok:
+            log(f"schtasks /Run 未成功（rc={r.returncode}）："
+                f"{(r.stderr or r.stdout or '').strip()[:200]}")
+        try:   # 任务定义用完即删（与 PowerShell 路径同一约定；不影响已运行实例）
+            subprocess.run([exe, "/Delete", "/TN", WATCHDOG_TASK_NAME, "/F"],
+                           capture_output=True, timeout=30, **no_window_kwargs())
+        except Exception:
+            pass
+        return ok
+    except Exception as exc:
+        log(f"schtasks 点火异常：{exc!r}")
+        return False
+
+
 def start_watchdog(wanted: dict) -> None:
     """启动退出后看护：等 ZCode 退出 → 应用重打包级补丁；顺带盯紧插件市场更新。
 
@@ -735,7 +819,6 @@ def start_watchdog(wanted: dict) -> None:
     market = installed_plugin()
     if not wanted and not market:
         return
-    pid_file = PID_FILE
     try:
         WATCHDOG_DIR.mkdir(parents=True, exist_ok=True)
         cur_wants = {}
@@ -754,15 +837,14 @@ def start_watchdog(wanted: dict) -> None:
     except Exception:
         pass
 
-    if pid_file.is_file():
-        try:
-            pid = int(pid_file.read_text(encoding="utf-8").strip())
-            from zcp_watchdog import is_pid_alive
-            if is_pid_alive(pid):
-                log(f"看护进程已在运行中 (PID {pid})，已更新需求清单，无需重复启动")
-                return
-        except Exception:
-            pass
+    # 单例判定以心跳为准（0.9.3）：旧方案只看 PID 文件 + is_pid_alive，被绞杀/崩溃的
+    # 看护残留的 PID 号被 Windows 复用给无关进程后，就永远误判「已有看护在跑」、从此
+    # 不再拉起 —— 换台电脑「完全退出也不重注入」的头号嫌疑。心跳停更/缺失一律按
+    # 「没有看护」处理重新拉起；就算误判成双看护，看护自己的心跳裁决也会让位退出。
+    live = live_watchdog_pid()
+    if live:
+        log(f"看护进程已在运行中 (PID {live}，心跳确认)，已更新需求清单，无需重复启动")
+        return
 
     args = ["--watch-plugin-update"]
     args += [f"--want={k}={'on' if v else 'off'}" for k, v in wanted.items()]
@@ -775,8 +857,8 @@ def start_watchdog(wanted: dict) -> None:
     if not way:
         kw = {"cwd": str(HERE), "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
         if os.name == "nt":
-            # 降级路径：计划任务被组策略禁用 / PowerShell 不可用时至少让看护起来；
-            # 但要清楚——这种起法仍挂在客户端进程树上，客户端重启大概率打断写入。
+            # 降级路径：计划任务被组策略禁用 / PowerShell 与 schtasks 都不可用时至少
+            # 让看护起来；但要清楚——这种起法仍挂在客户端进程树上，客户端重启大概率打断写入。
             kw["creationflags"] = DETACHED_PROCESS | CREATE_NO_WINDOW
             way = "Popen·树内（计划任务不可用，客户端若被重启写入可能被打断）"
         else:
@@ -784,7 +866,14 @@ def start_watchdog(wanted: dict) -> None:
             # 进程组里，应用退出/清理时可能被整组信号连带杀掉。
             kw["start_new_session"] = True
             way = "新会话组"
-        subprocess.Popen([sys.executable, str(WATCHDOG), *args], **kw)  # no-window-ok: kw 已按平台携带 DETACHED_PROCESS|CREATE_NO_WINDOW（Windows）/ start_new_session（POSIX）
+        try:
+            subprocess.Popen([sys.executable, str(WATCHDOG), *args], **kw)  # no-window-ok: kw 已按平台携带 DETACHED_PROCESS|CREATE_NO_WINDOW（Windows）/ start_new_session（POSIX）
+        except Exception as exc:
+            log(f"看护 Popen 启动失败: {exc!r}")
+            return
+        # 树内降级也要确认活性：派生成功 ≠ 进程活着（被杀软拦截同样无声无息）。
+        if not wait_watchdog_alive():
+            log("Popen 已派生但心跳未现身（可能被杀软拦截），本次退出注入可能无人执行")
     log(f"已启动退出后看护（{way}）: {' '.join(args)}")
 
 

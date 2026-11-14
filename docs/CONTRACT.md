@@ -107,6 +107,11 @@ IPC 通道：  "zcode:pilot-state"
   `lastContinueAt` 归 hook，`journal` 归渲染层。
 * 会话模式：`default`（跟随 `settings.defaultMode`）/ `off`（仅本会话关）/ `recover` / `loop`；
   旧版全局 `runtime=false` 在会话没有 `mode` 时兼容为 `off`。
+* **保留桶 `"draft"`（0.9.3 起，渲染层专用）**：还没建立会话的新对话（DOM `data-session-id`
+  字面值 `draft`）也允许切换开关，意图暂存到 `sessions["draft"].mode`。首条消息发出、
+  会话 id 出现后，渲染层把它提升为该会话的 `mode` 并把占位清回 `default`。
+  真实 session_id 不会等于 `"draft"`，hook 按真实 sid 查桶**永远读不到该占位**，
+  各写入方无需处理；它只是渲染层跨「发消息前后」传递意图的信箱。
 * 并发写用「同目录临时文件 + `os.replace`」原子替换，避免半截 JSON。
 
 * 缺文件 / 字段缺失 → 按上面默认值补齐（`enabled:true` 与插件清单默认值一致）。
@@ -123,6 +128,7 @@ IPC 通道：  "zcode:pilot-state"
 | 文件（均在 `~/.zcode/pilot/`） | 写入方 | 语义 |
 | --- | --- | --- |
 | `watchdog.pid` / `watchdog.want` | `zcp_sync.py` / `zcp_watchdog.py` | 看护单例与待办；**必须共享**，否则新旧版本的看护会同时存在并互相覆盖 |
+| `watchdog.beat` | `zcp_watchdog.py`（每轮轮询/每步补丁前后刷新） | 心跳账本 `{pid, ts}`（0.9.3）：**「看护是否在跑」的唯一事实源**。判定 = 心跳新鲜（≤120s）且心跳里的 PID 存活；只查 PID 会被 Windows PID 复用误判（残留死号被无关进程顶上 → 看护永远不再启动）。启动方点火后也用它确认看护真的起来了（≤15s 窗口） |
 | `watchdog.watch` | `zcp_sync.py`（`start_watchdog`） | 常驻监听开关；存在时看护即使没有待办也等到客户端退出 |
 | `injected.json` | `zcp_sync.py`（`write_inject_record`） | `{pluginVersion, pluginRoot}`：`app.asar` 当前注入的是哪个插件版本 |
 | `reinject.pending` | `zcp_sync.py`（`mark_reinject_pending`） | 重打包级补丁尚未落盘（被客户端提前启动打断）；下次会话据此提示「再完全退出一次、等看护自动拉起、别手动打开」 |
@@ -138,6 +144,12 @@ IPC 通道：  "zcode:pilot-state"
   防止把「更新器正在重启」误判成退出——那会让写入被预检拒绝并白白消耗一轮。
 * 写入被拒绝/未获得窗口时 **绝不删待办**：`watchdog.want` 与 `reinject.pending` 都保留，
   下次会话启动继续排期，并在会话里提示「退出后等看护自动拉起、别手动打开」。
+* **启动链三段兜底 + 活性确认**（0.9.3，Windows）：计划任务点火（PowerShell → schtasks.exe
+  兜底）→ `wait_watchdog_alive` 等心跳现身才算成功 → 都不行才降级 Popen·树内并留痕。
+  「点火成功」绝不直接当作「看护在跑」——pythonw 被杀软拦/Store Python 别名损坏时
+  失败是无声的。双看护竞态由心跳裁决：等待期发现心跳里是别的活实例 → 本实例让位退出。
+* **钩子入口的 Python 发现链**：`python → python3 → py -3`（Windows 官方安装器默认带
+  py launcher 但不一定进 PATH），任一可用即接住会话启动。
 
 ## 2.3 续跑主通道 = 官方 Stop Hook（**权威**，2026-10-28 依据 REA 结论定稿）
 
@@ -229,7 +241,8 @@ IPC 通道：  "zcode:pilot-state"
 * 点击原生侧边项 → 收起注入面板；React 重渲染把注入节点摘掉 → 1s 巡检自动补回。
 * 面板只写 `settings`，**不改插件配置页的 `enabled` 总开关**；总开关仍由插件配置页托管。
 * 输入框开关只写 `sessionMode: {id, mode}`，主进程 handler 落到 `sessions[id].mode`；
-  其他会话的 `mode/consecutive` 原样保留。
+  其他会话的 `mode/consecutive` 原样保留。未建会话的新对话（`data-session-id="draft"`）
+  同样可切换：id 传 `"draft"`，正式建会话后由渲染层提升到真实会话（见 §2.2 保留桶）。
 
 ### 2.3.6 TurnError 兜底（渲染层，2026-11-05 新增）
 
@@ -244,10 +257,22 @@ IPC 通道：  "zcode:pilot-state"
 
 * 事件流 `row.kind === "turnHeader" && row.state === "failed"` 触发；同一 `turnId`
   只处理一次（防同轮多次 upsert 连发）；`completedInterrupted` = 用户主动停止，**不接力**。
-* 触发前按序校验（任一不满足即放弃，并在 `__zcpCoreDiag.failedTurn.reason` 留痕）：
+* 触发前按序校验（任一不满足即**本轮暂不接力**，并在 `__zcpCoreDiag.failedTurn.reason` 留痕）：
   `stateReady`/桥存在 → 有 session → `sid === 当前 DOM 会话` → 会话未关/未暂停 →
   `settings.resumeFailedTurns !== false` → 当前不在流式 → `origin === "userInput"` →
   `executionKind` 为 `agent`（或缺失）→ 连续次数未达 `maxConsecutive` → 冷却已过。
+* ★ **拒绝分「暂时性」与「终局」两类（2026-11-13 补，0.9.3）**：
+  `still-streaming` / `no-session` / `not-current-session` 属于**暂时性**——内核的
+  `turnHeader(state:"failed")` 与 React 卸载 `v4-stop` 在同一轮内到达（事件先、渲染后），
+  此时用 DOM 兜底判流式必然为真。这类拒绝必须按 `[400, 900, 1800, 3200]` ms 延迟重判
+  （累计约 6.3s），**不得写 `failedTurnHandled`**：一旦当终局定案，该轮就永久放弃，
+  用户侧现象即「自动继续明明开着、上游 503 报错后却不动」。
+  其余原因（`bridge-missing` / `not-armed` / `setting-off` / `not-user-input` /
+  `not-agent` / `streak-limit` / `cooldown`）是**终局**，直接定案不再纠缠。
+  重判窗口内若 `lastTurnBySid` 变成别的 turnId（真人已自己发了消息）→ 立刻定案作废。
+* **终局必须留证据**：放弃时经 `patchState` 写 `state.json: lastFailedTurn`
+  （`{sessionId,turnId,reason,tries,at}`）。上游 503 这类现场无法主动复现，
+  只有落盘的判定才能事后定位「当时卡在哪一步」。
 * 通过后等 `graceMs`，再用 §2.3.4 同一套五级写回 + `v4-composer-send` 发送
   `settings.continueTextInterrupted`（默认 #1 `继续`）；1.5s 内无新流式活动则重试，
   单个 `turnId` 最多 2 次发送尝试。

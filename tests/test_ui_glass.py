@@ -98,6 +98,42 @@ class UiGlassSmoke(unittest.TestCase):
         self.assertNotIn("width:20rem!important", src,
                          "模型弹窗加宽的 CSS 覆盖必须删掉")
 
+    def test_tps_host_mounts_outside_scroll_clip_and_hugs_bottom(self):
+        """胶囊必须挂到滚动容器之外才能真正贴底（2026-11-13 两轮用户实测定案）。
+
+        CDP 实测（ZCode 3.18.2）：`.v4-timeline` 是 overflow-y:auto 的滚动容器，
+        composer dock 是它里面的 `position:sticky; bottom:0`。
+        ① 宿主用 transform 位移 → 不参与布局高度，往上滚被 overflow 裁掉 6px（“遮挡一半”）。
+        ② 宿主留在时间线内、只调 margin → 永远被裁在时间线底边，而那条边距窗体底还隔着
+           父容器 pb-4(16px)+窗体(7px)，怎么调都“悬空/太高”。
+        正解：把宿主挂到 v4-timeline **之外**作 flex 兄弟，再用「负 margin-bottom =
+        父容器底部 padding」拉进 padding 区 —— 实测距窗体底 7px，时间线 flex-1 自动让位，
+        无裁切、不压输入卡片。找不到时间线时退回卡片后的旧落点。
+        """
+        src = _read("zcode-tps.js")
+        m = re.search(r"function attach\(host\) \{(.*?)\n  \}", src, re.S)
+        self.assertIsNotNone(m, "找不到 attach()")
+        body = m.group(1)
+        self.assertFalse(re.search(r"transform:\s*[\"']", body),
+                         "宿主内联样式禁止 transform：sticky dock 下它会越过滚动容器底边被裁")
+        # 必须挂到滚动容器之外（否则永远到不了窗体底）
+        self.assertIn('v4-timeline', body, "attach() 必须定位 v4-timeline 以挂到滚动容器之外")
+        self.assertIn('insertAdjacentElement("afterend", host)', body)
+        # 负 margin-bottom 把宿主拉进父容器底部 padding 区（贴底的关键）
+        self.assertIn("paddingBottom", body, "必须读取父容器底部 padding 以计算负 margin")
+        self.assertIn("marginBottom: (-padB)", body, "缺少贴底所需的负 margin-bottom")
+        # 找不到时间线时的兜底落点仍要占布局、不用 transform
+        self.assertIn('alignSelf: "stretch"', body, "兜底落点缺少与卡片同宽的 alignSelf")
+        # 样式改版必须同步递增 LAYOUT_V，否则已挂载的旧宿主走快路径拿不到新内联样式
+        self.assertRegex(src, r'const LAYOUT_V = "ztps-layout-\d+"',
+                         "LAYOUT_V 缺失：attach() 的内联样式无法绕过快路径刷新")
+        self.assertIn('host.getAttribute("data-ztps-layout") === LAYOUT_V', body,
+                      "快路径必须校验布局版本")
+        # 半透明胶囊会被滚过的正文透视遮挡：渐变下必须垫一层不透明画布色
+        self.assertIn("--ztps-canvas", src, "缺少不透明画布色变量")
+        self.assertIn("background-color:var(--ztps-canvas);", src,
+                      "chip 必须有不透明底色垫在绿色渐变下")
+
     def test_model_width_is_offline_everywhere(self):
         import zcp_watchdog as aae
         import zcp_sync

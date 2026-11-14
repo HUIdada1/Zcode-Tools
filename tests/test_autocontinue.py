@@ -1348,8 +1348,13 @@ class TestTpsPresentation(unittest.TestCase):
         self.assertIn('const NS_SVG = "http://www.w3.org/2000/svg"', self.src)
         self.assertIn("document.createElementNS(NS_SVG, \"svg\")", self.src)
         self.assertIn("ztps-ico", self.src)
-        for banned in ("<img", "url(", "background-image", "fetch(", "XMLHttpRequest"):
+        for banned in ("<img", "url(", "fetch(", "XMLHttpRequest"):
             self.assertNotIn(banned, self.code, "引入了外部资源：" + banned)
+        # background-image 只禁「外部图片」；内联渐变 linear-gradient 是零外部资源的合法用法
+        # （2026-11-13：胶囊垫不透明画布色 + 绿色渐变防透视，拆成 background-color/background-image）。
+        # 外部背景图必然走 url(...)，上面已禁；这里再显式兜底一层。
+        self.assertNotRegex(self.code, r"background-image:\s*url\(",
+                            "background-image 引入了外部图片")
 
     def test_position_fixed_no_second_mount(self):
         """位置不可更改：只有一个 composer-below 落点，位置偏好彻底不再读写。"""

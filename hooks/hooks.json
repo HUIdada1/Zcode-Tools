@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_sync.py\" --detach || python3 \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_sync.py\" --detach",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_sync.py\" --detach || python3 \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_sync.py\" --detach || py -3 \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_sync.py\" --detach",
             "shell": true,
             "timeoutMs": 120000
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_hook.py\" --event stop || python3 \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_hook.py\" --event stop",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_hook.py\" --event stop || python3 \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_hook.py\" --event stop || py -3 \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_hook.py\" --event stop",
             "shell": true,
             "timeoutMs": 30000
           }
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_hook.py\" --event user-prompt || python3 \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_hook.py\" --event user-prompt",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_hook.py\" --event user-prompt || python3 \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_hook.py\" --event user-prompt || py -3 \"${CLAUDE_PLUGIN_ROOT}/skills/zcode-pilot/scripts/zcp_hook.py\" --event user-prompt",
             "shell": true,
             "timeoutMs": 15000
           }

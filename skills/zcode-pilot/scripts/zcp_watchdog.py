@@ -32,6 +32,14 @@ LOG = HERE / "_zcp_watchdog.log"
 STATE_DIR = Path.home() / ".zcode" / "pilot"
 PID_FILE = STATE_DIR / "watchdog.pid"
 WANT_FILE = STATE_DIR / "watchdog.want"
+#: 心跳账本（watchdog.beat，与 WANT_FILE 同目录）：看护每轮轮询刷新 {pid, ts}。
+#: 0.9.3 起「看护是否在跑」的唯一事实源 —— 旧方案只看 PID 文件 + is_pid_alive，而
+#: 被连坐绞杀/崩溃的看护来不及清 PID 文件，Windows 又按顺序复用 PID：死号一旦被
+#: 无关进程顶上，启动方就永远误判「已有看护在跑」、从此不再拉起，表现为
+#: 「换了台电脑，完全退出也不重注入」。心跳停更即视为已死，防的就是这种误判。
+BEAT_FRESH_SEC = 120        # 单例判定：心跳新鲜窗口（补丁期可达数分钟，须宽容）
+LAUNCH_CONFIRM_SEC = 10     # 启动方点火后等看护现身的最长时间
+LAUNCH_BEAT_FRESH_SEC = 15  # 启动确认时的新鲜窗口（刚点火，要求紧）
 POLL_SEC = 1
 #: 常驻监听插件更新时（没有待办）用低频轮询，避免整场会话每秒都去 tasklist；
 #: 真有待办补丁时仍用 POLL_SEC，保证退出后尽快落盘。
@@ -96,6 +104,75 @@ def is_pid_alive(pid: int) -> bool:
             return True
         except OSError:
             return False
+
+
+def _beat_path() -> Path:
+    """心跳文件路径：跟 WANT_FILE 同目录（测试把 WANT_FILE 改到临时目录时自动隔离）。"""
+    return WANT_FILE.with_name("watchdog.beat")
+
+
+def write_beat() -> None:
+    """刷新心跳 {pid, ts}。任何失败都吞掉 —— 心跳只是辅助判据，不能反过来弄死看护。"""
+    try:
+        import json
+        p = _beat_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"pid": os.getpid(), "ts": time.time()}), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def read_beat() -> dict:
+    try:
+        import json
+        return json.loads(_beat_path().read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _beat_ts_fresh(hb: dict, max_age: float) -> bool:
+    try:
+        return time.time() - float(hb.get("ts") or 0) <= max_age
+    except Exception:
+        return False
+
+
+def live_watchdog_pid(max_age: float = BEAT_FRESH_SEC) -> int:
+    """返回「可信存活中的看护」PID；没有则 0。判定 = 心跳新鲜 且 心跳里的 PID 活着。
+
+    心跳是单例判定的唯一事实源（见 BEAT 常量处的注释）：PID 文件残留 + PID 复用
+    会让 is_pid_alive 把无关进程当成看护；反过来，只看心跳时间戳又区分不了
+    「刚写完就死」的残留 —— 两者必须同时成立才承认活着。
+    """
+    hb = read_beat()
+    try:
+        pid = int(hb.get("pid") or 0)
+    except (TypeError, ValueError):
+        return 0
+    if pid > 0 and is_pid_alive(pid) and _beat_ts_fresh(hb, max_age):
+        return pid
+    return 0
+
+
+def wait_watchdog_alive(timeout: float = LAUNCH_CONFIRM_SEC) -> bool:
+    """启动方专用：点火之后等看护进程真的现身（心跳出现新 PID 且新鲜）。
+
+    点火成功 ≠ 进程活着：pythonw 被杀软拦截 / Store Python 别名损坏 / 组策略
+    静默拒绝启动，这些失败都不带任何声响。没有这一步，「TASK_OK 打了但看护根本
+    没起来」就会表现为「退出了却什么都没注入」。等不到返回 False，让调用方走
+    下一级兜底 —— 宁可多起一个（单例账本会裁决），绝不能一个都没有。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        hb = read_beat()
+        try:
+            pid = int(hb.get("pid") or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        if pid > 0 and is_pid_alive(pid) and _beat_ts_fresh(hb, LAUNCH_BEAT_FRESH_SEC):
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def zcode_running() -> bool:
@@ -258,10 +335,12 @@ def apply_plugin_update(upd: dict) -> bool:
         log(f"插件已更新至 v{upd['version']}，但在 {upd['root']} 下找不到 zcp_sync.py，改走本地补丁")
         return False
     log(f"检测到插件已更新 {upd.get('from', '?')} → v{upd['version']}，改用新版脚本重注入：{script}")
+    write_beat()
     try:
         r = subprocess.run([PYTHON, str(script), "--apply-now"], capture_output=True,
                            timeout=PATCH_TIMEOUT, cwd=str(script.parent),
                            **no_window_kwargs())
+        write_beat()
         out = ((r.stdout or b"") + (r.stderr or b"")).decode("utf-8", "replace")
         log(f"$ zcp_sync.py --apply-now  [exit={r.returncode}]\n{out}".rstrip())
     except subprocess.TimeoutExpired:
@@ -392,6 +471,7 @@ def _cleanup_singletons(cur_pid: int) -> None:
         if PID_FILE.is_file() and PID_FILE.read_text(encoding="utf-8").strip() == str(cur_pid):
             PID_FILE.unlink(missing_ok=True)
         WANT_FILE.unlink(missing_ok=True)
+        _beat_path().unlink(missing_ok=True)   # 连心跳一起清：防退出瞬间 PID 复用造成 120s 误判
     except Exception:
         pass
 
@@ -412,20 +492,20 @@ def _release_pid(cur_pid: int) -> None:
 def main() -> int:
     import os
     cur_pid = os.getpid()
-    if PID_FILE.is_file():
-        try:
-            old_pid = int(PID_FILE.read_text(encoding="utf-8").strip())
-            if old_pid != cur_pid and is_pid_alive(old_pid):
-                log(f"已有活跃看护运行中 (PID {old_pid})，已登记最新需求，本实例退出")
-                _save_wants(sys.argv[1:])
-                return 0
-        except Exception:
-            pass
+    # 单例判定以心跳为准（live_watchdog_pid），不再只信 PID 文件 —— 被绞杀/崩溃的
+    # 看护残留的 PID 号被 Windows 复用给无关进程后，is_pid_alive 会误判「已有看护」，
+    # 本实例白白退出、看护从此不再被拉起（0.9.3 前后两处同病，见 BEAT 常量处注释）。
+    live = live_watchdog_pid()
+    if live and live != cur_pid:
+        log(f"已有活跃看护运行中 (PID {live}，心跳确认)，已登记最新需求，本实例退出")
+        _save_wants(sys.argv[1:])
+        return 0
     try:
         PID_FILE.parent.mkdir(parents=True, exist_ok=True)
         PID_FILE.write_text(str(cur_pid), encoding="utf-8")
     except Exception:
         pass
+    write_beat()   # 先占住心跳账本：启动方（zcp_sync）的活性确认靠它
     _save_wants(sys.argv[1:])
 
     # 常驻监听（插件市场更新）：没有待办也要等退出，届时检查版本是否变了。
@@ -463,6 +543,14 @@ def main() -> int:
     for round_no in range(1, MAX_PATCH_ROUNDS + 1):
         waited = 0
         while zcode_running():
+            # 双看护裁决：等待期出现另一个心跳更新的实例 → 本实例让位退出。
+            # 必须先读后写，否则两个实例各自覆盖心跳、谁也看不见谁。
+            live = live_watchdog_pid()
+            if live and live != cur_pid:
+                log(f"检测到更新的看护实例 (PID {live}) 已接管，本实例让位退出")
+                _release_pid(cur_pid)
+                return 0
+            write_beat()
             time.sleep(poll)
             waited += poll
             if waited >= MAX_WAIT_SEC:
@@ -476,6 +564,7 @@ def main() -> int:
             continue
 
         log(f"ZCode 已退出（等待 {waited}s），开始写入（第 {round_no}/{MAX_PATCH_ROUNDS} 轮）")
+        write_beat()   # 进入写盘阶段前再刷一次：补丁可能要跑数分钟，别让心跳被判过期
 
         # ★ 插件市场更新优先：更新只换了插件目录，旧目录的脚本还是旧实现。
         #   必须改用**新版目录**的 zcp_sync.py 按期望状态重写，绝不能用本地 patcher 把旧版写回去。
@@ -499,9 +588,11 @@ def main() -> int:
         failed = 0
         for args, revert in tasks:
             cmd = [PYTHON, str(HERE / "zcp_patcher.py"), *args] + (["--revert"] if revert else [])
+            write_beat()   # 每个 zcp_patcher 子进程前后各刷一次心跳（单次可达数分钟）
             try:
                 r = subprocess.run(cmd, capture_output=True, timeout=PATCH_TIMEOUT,
                                    **no_window_kwargs())
+                write_beat()
             except subprocess.TimeoutExpired:
                 # 超时 = 这一项没做成。继续跑剩下的项（能写一项是一项），最后计入 failed。
                 log(f"$ zcp_patcher.py {' '.join(cmd[2:])}  [超时 {PATCH_TIMEOUT}s]")

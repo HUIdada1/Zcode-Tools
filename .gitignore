@@ -59,6 +59,9 @@ apply_after_exit.log
 .box-agent-scratch/
 NVIDIA Corporation/
 
+# 客户端把本仓库登记为本地插件市场时写的机器本地配置（不入库）
+.zcode/
+
 # 本地逆向/探测证据（含抓包截图与请求样本，不入库）
 .research/
 

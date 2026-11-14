@@ -46,6 +46,13 @@ python "<skill目录>/scripts/zcp_doctor.py" --where  # 只查「插件装在哪
 
 ## 版本现状（动手前先看）
 
+> **0.9.3 新对话（draft）可直接切自动继续**：未发首条消息的新对话，旧版开关拒切（「发送一条
+> 消息后再切换」）。现在切换写保留桶 `sessions["draft"]`（客户端未建会话时 `data-session-id`
+> 就是字面 `draft`，3.18.2 实测），建会话后由 `promoteDraftIntent()` 提升为正式会话的 `mode`
+> 并把占位清回 `default`（巡检 1.5s 一拍 + `userInput` 行快路径）。提升双重防误写：正式 id
+> 出现瞬间必须是当初那个 draft DOM 节点本身，且需事件流认出该 id 或停止按钮在其 own frame 内
+> （分屏别处生成不算）；10s 窗口拿不到证据即作废清占位。细节以 docs/CONTRACT.md §2.2
+> 「保留桶 draft」为准。
 > **0.9.2 Windows 看护改经计划任务在 ZCode 进程树之外启动**：此前看护由 SessionStart 钩子直接
 > `Popen`，是 `ZCode.exe → zcode-runtime-host.exe → shell → python` 的后代；托盘「退出」会连根收掉
 > 整棵后代树，而 `DETACHED_PROCESS` 只脱控制台不脱树 —— 看护在观测到退出前就被绞杀，表现为
@@ -54,6 +61,14 @@ python "<skill目录>/scripts/zcp_doctor.py" --where  # 只查「插件装在哪
 > 定义（不影响已运行实例、不留计划残留）；计划任务被组策略禁用 / 无 PowerShell 时自动降级回
 > `Popen` 并在日志标注「树内」。同步日志成功形态：`已启动退出后看护（计划任务·树外）: ...`。
 > 排查时若看到「（Popen·树内…」，说明该机器上计划任务不可用，客户端被重启时写入大概率被打断。
+>
+> **0.9.3 两段式启动 + 心跳单例（换台电脑「退了也不注入」的修复）**：点火成功 ≠ 进程活着
+> （pythonw 被杀软拦 / Store Python 别名损坏全都无声）—— 点火后必须等 `~/.zcode/pilot/watchdog.beat`
+> 心跳现身才算成功（`wait_watchdog_alive`），等不到就降级兜底；PowerShell 被策略禁用时改用
+> `schtasks.exe` 直接点火（同一 Task Scheduler 服务）。单例判定也不再只看 PID 文件：
+> Windows 会复用被绞杀看护的 PID 号，`is_pid_alive` 会把无关进程当成看护、从此永不重拉 ——
+> 现在判定 = 心跳新鲜（≤120s）且心跳里的 PID 存活；`hooks.json` 的 Python 发现链也加宽为
+> `python → python3 → py -3`。doctor 会直接报告「最近一次看护拉起方式」与「看护是否在跑（心跳确认）」。
 
 > **0.9.0 脚本改名**：脚本统一 `zcp_` 前缀 —— `zcp_patcher.py` / `zcp_sync.py` / `zcp_watchdog.py` /
 > `zcp_doctor.py` / `zcp_hook.py` / `zcp_loopguard.py` / `zcp_modelpull.py` / `zcp_console.py` 等；
@@ -646,17 +661,54 @@ python zcp_patcher.py --tps-footer --tps-src /path/to/zcode-tps.js   # 指定注
 | 面板定位 | `body` 级 `fixed`，锚定所点框；优先向下、放不下翻上（`data-placement` 控制入场方向）；点击外部 / Esc / **无操作 15s** 收起 |
 | 三态 | `idle` 静默绿点 / `stream` 绿点呼吸 + 双框底色与描边加强 / `done` 转静默，由 `data-state` 驱动 |
 | 主题 | 自身变量按「`.dark` / `[data-theme='light']` → `prefers-color-scheme`」两级判定；绿色令牌 `--ztps-green-*` 统一控制 |
-| 底部边距 | 状态条 `marginTop` 3px（原 6px 减半），与输入框同宽、水平居中 |
+| 底部边距 | 宿主挂到滚动容器 `v4-timeline` **之外**作 flex 兄弟，`marginTop: 3px` + `marginBottom: -父容器底部padding`，与输入框同宽、水平居中，真正贴窗体底（距底约 7px）；见下方「位置硬约束」 |
 | 无障碍 | 框是 `role=button` 且可键盘 Enter/Space 打开；`prefers-reduced-motion: reduce` 下关闭呼吸与过渡 |
 | 零外部资源 | 无字体、无图片（图标是内联 SVG 字符串）、无网络请求，全部样式由 `zcode-tps.js` 自身注入 |
 
 ### 位置固定（不可切换）
 
-统计条**只有**一个落点：composer 卡片之后的独立行（`insertAdjacentElement("afterend")` 于卡片后），`alignSelf: stretch` 与输入框同宽、水平居中。
+统计条**只有**一个落点：滚动容器 `v4-timeline` **之后**的独立行（`insertAdjacentElement("afterend")` 于时间线后，作它的 flex 兄弟），与输入框同宽、水平居中、真正贴窗体底。找不到时间线（空态/设置页）时退回「composer 卡片之后」的旧落点兜底。
 
 - 原先的「右键自绘菜单 → 输入框工具栏 / 会话顶部 sticky」两种落点已整体下线：会话顶部会遮挡标题行并被误认成官方控件，工具栏行内会与官方控件抢位。
 - 启动时 `localStorage.removeItem("ztps-pos")` 清掉历史偏好；`removeLegacyFooters()` 顺带摘除老版本遗留的 `[data-ztps-menu]` 浮层节点。
 - 挂载点找不到（新建任务空态、设置页、侧边栏辅助对话）时自清理，`window.__zcpMeterDiag.attachMode`/`hiddenReason` 可诊断。
+
+#### 位置硬约束：宿主必须挂到滚动容器之外才能贴底（2026-11-13 三轮 CDP 实测定案）
+
+官方 composer dock 的真实结构（ZCode 3.18.2，CDP 在运行中的客户端量得）：
+
+```
+div.relative.flex.flex-col.pb-4              ← 时间线父容器，底部 padding 16px
+ └ [data-testid=v4-timeline]  overflow-y:auto ← 真正的滚动容器（flex-1）
+    └ div.flex.min-h-full.flex-col …          ← 滚动内容
+       ├ div（消息列表，flex-1）
+       └ div.sticky.bottom-0                  ← dock：position:sticky; bottom:0
+          └ [conversation-bottom-dock-transition(-layer)]
+             └ [data-testid=v4-composer]  卡片
+ └ [data-ztps-mode]                           ← 我们的宿主（时间线之后，滚动区之外）
+```
+
+三轮实测的因果链（每一轮都是用户真实反馈驱动）：
+
+1. **transform 位移 → 滚动被裁一半**：宿主留在 dock 内、用 `transform: translateY(6px)` 贴底，
+   这 6px 不参与布局高度，往上滚时 sticky 把 dock 底边钉在滚动容器底边，胶囊越过那条边被
+   `overflow` 恒定裁掉 6px（胶囊高 26px → 「遮挡一半」）。
+2. **只调 margin、仍在时间线内 → 永远悬空/太高**：改成占布局的 margin 虽不再被裁，但胶囊
+   永远被限制在时间线底边，而那条边距窗体底还隔着父容器 `pb-4`(16px)+窗体(7px)=23px，
+   怎么调 margin 都到不了窗体底（用户反馈「位置太高」）。
+3. **正解（layout-4）：挂到时间线之外 + 负 margin 拉进底部 padding**：宿主作时间线的 flex
+   兄弟（脱离 overflow 裁切），`marginBottom = -父容器底部padding` 把它拉进 padding 区，
+   时间线 `flex-1` 自动让位。实测胶囊稳定在距窗体底 **7px**、所有滚动位置完整可见、不压输入卡片。
+
+实现要点（改 `attach()` 前必读）：
+
+- **负 margin 必须每拍重算**：初次挂载常发生在加载期，父容器 `pb-4` 还没生效（padB=0），
+  若只在首次写死，margin 会永远停在 0、胶囊悬空 23px。快路径里也要同步 `marginBottom` 与宽度。
+- 宿主宽度取 composer 卡片实时宽度、`alignSelf: center`（窗口缩放时卡片宽度会变，快路径同步）。
+- 半透明渐变底会被滚过的正文「透视遮挡」，故 chip 底下垫一层不透明 `--ztps-canvas`
+  （`background-color` + 内联 `background-image: linear-gradient`，零外部资源）。
+- 内联布局样式的改版必须递增 `LAYOUT_V`（现 `ztps-layout-4`）——否则已挂载的旧宿主
+  命中 `attach()` 快路径，新样式永远刷不上去。
 
 ### 数据链路原理（无常驻服务）
 
@@ -685,6 +737,8 @@ python zcp_patcher.py --tps-footer --tps-src /path/to/zcode-tps.js   # 指定注
 |---|---|
 | 升级后胶囊消失 | app.asar 被覆盖，重跑 `--tps-footer`（注入源默认 skill 自带 zcode-tps.js） |
 | 重启后无胶囊 | `--tps-footer --check` 看 state；渲染进程 console 查 `window.__zcpMeter` 是否存在 |
+| ★ **往上滚动时胶囊被裁一半 / 位置太高悬空** | 确认注入的是 `LAYOUT_V=ztps-layout-4` 及以后（console：`document.querySelector('[data-ztps-mode]').getAttribute('data-ztps-layout')`）。旧版 transform 位移会被裁；留在时间线内只调 margin 会悬空 23px。layout-4 把宿主挂到时间线之外 + 负 margin 贴底。重跑 `--tps-footer` 即热更新 |
+| ★ **补丁打上了、重启后又被回退** | 同步进程 `zcp_sync` 在 SessionStart 时从**已安装插件缓存**（`~/.zcode/cli/plugins/cache/zcode-pilot/.../<版本>/skills/...`）重注入，会覆盖手工注入的工作区新版。改完工作区脚本必须**同步覆盖已安装缓存里的对应脚本**（先备份），否则下次会话启动即回退。核对 `~/.zcode/pilot/injected.json` 的 `pluginRoot`/`recordedAt` 定位是哪次同步覆盖的 |
 | console 出现 CSP 拦截报错 | 当前版本 index.html 无 CSP；若未来版本加了，需同步放宽 `script-src` 允许同目录脚本 |
 | 指标一直只有状态点、没有数值 | usage.delta 未关联到轮（看 `window.__zcpMeterTurns` 里轮的 out/lastUsageAt 是否为空）；版本升级导致帧结构变化时，用 `window.__zcpMeterPort` 旁路监听原始帧比对字段 |
 | tok/s 不出现 | 该轮从未有过文本流（纯工具调用轮）时无速度可算，属预期；有文本流后静默期（工具执行）保持最近值 |
@@ -836,13 +890,23 @@ python zcp_patcher.py --auto-continue --pilot-src /path/to/zcode-pilot.js   # �
 
 1. 同一 `turnId` 只处理一次；`completedInterrupted`（用户主动停止）不接力；
 2. 校验当前会话/开关/暂停/流式/`origin=userInput`/`executionKind=agent`/连发上限/冷却；
-3. 等 `graceMs` → 五级写回 + `v4-composer-send` 发送 `continueTextInterrupted`；
-4. 1.5s 无流式活动重试，单个 turnId 最多 2 次；成功按 `session_id` 记
+3. ★ **暂时性拒绝必须延迟重判，不能当终局**（0.9.3 修）：`still-streaming` / `no-session` /
+   `not-current-session` 会在几十~几百毫秒内自己消失。官方的 `turnHeader(state:"failed")`
+   与 React 卸载 `v4-stop` 按钮在**同一轮**——事件先到、渲染后到，于是 `isStreaming()` 的
+   DOM 兜底必然读到残留的停止按钮。旧实现在此直接定案，等于**每一轮上游失败都必然放弃兜底**
+   （实测 2026-11-13 17:10:19 上游 503 重试 11 次耗尽 → `turn.failed`，之后 4 分钟没有任何
+   自动续跑）。现在按 `[400, 900, 1800, 3200]` ms 重判（累计约 6.3s），期间若被新轮次接管
+   立即作废；重试窗口用尽仍不松口才定案，且把终局判定经 `patchState` 落盘
+   `state.json: lastFailedTurn{sessionId,turnId,reason,tries,at}`；
+4. 等 `graceMs` → 五级写回 + `v4-composer-send` 发送 `continueTextInterrupted`；
+5. 1.5s 无流式活动重试，单个 turnId 最多 2 次；成功按 `session_id` 记
    `localStorage["zpilot-error-streak"]`，成功回合或真人输入清零。
 
 排障只读入口：`window.__zcpCoreApi.whyFailedWouldResume()`（返回空串=现在会兜底，
-否则返回 `setting-off` / `not-armed` / `streak-limit` / `cooldown` 等原因）
-与 `window.__zcpCoreApi.errorStreak()`。
+否则返回 `setting-off` / `not-armed` / `streak-limit` / `cooldown` / `still-streaming` 等原因）、
+`window.__zcpCoreApi.errorStreak()`，以及事后取证用的 `state.json` 里 `lastFailedTurn`
+（上游 503 这类现场无法主动复现，只能靠落盘的终局判定还原当时卡在哪一步）。
+渲染层内判定轨迹：`window.__zcpCoreDiag.failedTurn` / `.failedTurnRetry` / `.failedTurnSkip`。
 
 > 该兜底依赖渲染层脚本注入；**Stop hook 本身不依赖 asar**，客户端升级后仍存活，
 > 但失败轮次兜底必须等插件重新注入（完全退出后看护写入）后才生效。
@@ -949,6 +1013,7 @@ preload / main 注入块复用 `_process_ipc_patch(..., PILOT_SPEC)` 链路，�
 | 现象 | 处理 |
 |---|---|
 | 一轮结束后没有自动继续 | ① `--auto-continue --check` 看四组件是否就位；② 看 `hooks/hooks.json` 是否注册了 `Stop`（ZCode 日志里 `hookCount` 为 0 = 插件没启用）；③ 状态文件里 `enabled` 为真、`paused` 为假，且当前会话 `sessions[sid].mode` 不是 `off`；④ 是否正撞上 20s 冷却或本会话已连续 3 次；⑤ 若是 `Turn execution failed ... retryable=false`，Stop hook **不会触发**，检查渲染层是否已注入最新版（`window.__zcpCoreApi.whyFailedWouldResume()`），旧注入会显示 `bridge-missing` 或无此 API |
+| ★ 上游报错「模型服务暂时不可用」后不自动续跑 | 官方会自己重试到 `maxAttempts` 耗尽才发 `turn.failed`（日志 `model.network.retry_scheduled`），此时失败轮兜底才接管。**0.9.3 之前**：兜底在 failed 事件与 DOM 卸载的同一轮里读到残留的 `v4-stop`，判 `still-streaming` 后**永久放弃该轮**——表现为「开关明明开着却不动」。核对 `state.json` 的 `lastFailedTurn.reason`（`still-streaming`=旧版竞态；`not-armed`/`cooldown`/`streak-limit`=正常拒绝）；`window.__zcpCoreDiag.scriptVersion` 应为 `1.1` 及以上 |
 | 自动继续太频繁 | 冷却 20s 是硬常量，不可调；确认没有多会话同时在跑（计数按 `session_id` 分桶） |
 | 关掉开关后仍在自动打断 | 输入框开关只关**当前会话**（写 `sessions[sid].mode=off`）。要全局关停请在插件配置页把「自动继续」关闭并保存（写 `enabled:false` + `paused:true` + `cancelToken` +1），或直接改状态文件 |
 | 循环守卫误伤 | 判据要求**尾部连续**重复且结果之间无差异信号；中途换了动作并已产生输出即不算循环。可用 `python scripts/zcp_loopguard.py --transcript <transcript.jsonl>` 复核判定 |

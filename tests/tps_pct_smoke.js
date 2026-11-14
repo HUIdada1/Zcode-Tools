@@ -162,9 +162,18 @@ check(/\.ztps-chip-main\{color:var\(--ztps-green-strong\)/.test(src), "左/右�
 check(/\.ztps-chip-sub\{color:var\(--ztps-green-soft\)/.test(src), "左/右次级值没有统一绿色");
 check(/fmtTok\(totalTok\)[\s\S]{0,160}\{ dot: true \}/.test(src),
   "右侧 Token 框没有和左侧一样的状态点");
-check(/marginTop: "3px"/.test(src), "底部边距应从 6px 减半到 3px");
-check(/transform: "translateY\(6px\)"/.test(src),
-  "状态条应整体下移 6px（贴住窗口底部，不要悬空）");
+// 2026-11-13 CDP 两轮实测定案：composer dock 是 position:sticky;bottom:0，挂在 overflow-y:auto
+// 的 .v4-timeline 里。① transform 不参与布局高度 → 往上滚被裁 6px（“遮挡一半”）；② 留在时间线内
+// 只调 margin → 永远被裁在时间线底边，距窗体底还隔父容器 pb-4+窗体共 23px（“太高/悬空”）。
+// 正解：挂到 v4-timeline 之外作 flex 兄弟 + 负 margin-bottom 拉进父容器底部 padding 区（贴底）。
+check(/v4-timeline/.test(src) && /marginBottom: \(-padB\)/.test(src),
+  "宿主必须挂到滚动容器 v4-timeline 之外并用负 margin-bottom 贴底，否则永远悬空");
+check(!/transform:\s*"translateY/.test(src),
+  "宿主禁止用 transform 位移：sticky dock 下它会越过滚动容器底边被 overflow 裁掉");
+check(/position: "relative", zIndex: "5"/.test(src),
+  "宿主需压过同层节点，否则滚过的正文会透视遮挡胶囊");
+check(/--ztps-canvas/.test(src) && /background-color:var\(--ztps-canvas\);/.test(src),
+  "chip 需要不透明画布底色垫在绿色渐变下（防透视遮挡）");
 check(/backdrop-filter:blur\(24px\)/.test(src), "明细面板缺少毛玻璃 backdrop-filter");
 check(/POP_AUTO_CLOSE_MS/.test(src) && /armPopTimer/.test(src),
   "明细面板缺少无操作自动收起");

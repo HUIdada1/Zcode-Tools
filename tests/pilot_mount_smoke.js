@@ -666,6 +666,65 @@ async function main() {
   const streak8b = JSON.parse(h8.sandbox.localStorage.getItem("zpilot-error-streak") || "{}");
   check(!streak8b["s-1"], "真人输入后应清零失败连发计数，实际=" + JSON.stringify(streak8b));
 
+  // ============ 场景 8b：失败瞬间 DOM 上 v4-stop 还没卸载（2026-11-13 真机竞态） ============
+  // 上游 503 重试耗尽那一刻，内核的 turnHeader(failed) 与 React 卸载停止按钮在**同一轮**：
+  // 事件先到、渲染后到。isStreaming() 的 DOM 兜底因此必然命中残留的 v4-stop，
+  // 判定成 still-streaming。旧实现在这里直接定案放弃 —— 用户的现象就是
+  // 「自动继续明明开着，报错后却不自己续跑」（实测 17:10:19，之后 4 分钟无人工输入没有任何新轮次）。
+  // 正确行为：暂时性拒绝要延迟重判，等 DOM 追上事件流，把这一轮救回来。
+  const doc8b = makeDocument();
+  const t8b = buildTree(doc8b);
+  const stopBtn = t8b.mk("button", { "data-testid": "v4-stop" });
+  t8b.row.appendChild(stopBtn);
+  const h8b = boot(doc8b, {}, {});
+  await tickAsync(); h8b.tick(); await tickAsync();
+  h8b.feed([{ kind: "turnHeader", sessionId: "s-1", turnId: "turn-f2", state: "running",
+              origin: "userInput", executionKind: "agent", startedAt: 1 }]);
+  h8b.feed([failedRow({ turnId: "turn-f2" })]);
+  const d8b = h8b.sandbox.__zcpCoreDiag;
+  check(d8b.failedTurn && d8b.failedTurn.reason === "still-streaming",
+    "停止按钮还在 DOM 上时应判 still-streaming，实际=" + JSON.stringify(d8b.failedTurn));
+  check(d8b.failedTurnRetry && d8b.failedTurnRetry.tries === 1,
+    "暂时性拒绝必须排延迟重判（旧实现到此永久放弃），实际=" + JSON.stringify(d8b.failedTurnRetry));
+  check(t8b.send.__clicks === 0, "竞态窗口内绝不能抢发「继续」");
+  // React 下一帧卸载停止按钮 → 重判必须松口并排期续跑
+  stopBtn.remove();
+  h8b.runTimers(1);
+  await tickAsync();
+  check(d8b.failedTurn && d8b.failedTurn.reason === "scheduled",
+    "DOM 追上后这一轮必须被救回，实际=" + JSON.stringify(d8b.failedTurn));
+  h8b.runTimers(1);
+  await tickAsync();
+  check(t8b.input.value === "继续" && t8b.send.__clicks === 1,
+    "救回后要按宽限期补发「继续」，实际 value=" + JSON.stringify(t8b.input.value) + " 点击=" + t8b.send.__clicks);
+  h8b.clock.now += 1000;
+  h8b.feed([{ kind: "reasoning", sessionId: "s-1", turnId: "turn-f2", text: "x", state: "streaming" }]);
+  h8b.runTimers(1);
+  await tickAsync();
+  check(d8b.errorResumeResult === "ok", "竞态救回的续跑应正常判定成功，实际=" + d8b.errorResumeResult);
+
+  // ============ 场景 8c：停止按钮一直不消失 → 重试窗口内不得发送，事后要能取证 ============
+  const doc8c = makeDocument();
+  const t8c = buildTree(doc8c);
+  const stopStuck = t8c.mk("button", { "data-testid": "v4-stop" });
+  t8c.row.appendChild(stopStuck);
+  const h8c = boot(doc8c, {}, {});
+  await tickAsync(); h8c.tick(); await tickAsync();
+  h8c.feed([{ kind: "turnHeader", sessionId: "s-1", turnId: "turn-f3", state: "running",
+              origin: "userInput", executionKind: "agent", startedAt: 1 }]);
+  h8c.feed([failedRow({ turnId: "turn-f3" })]);
+  h8c.runTimers(8);
+  await tickAsync();
+  const d8c = h8c.sandbox.__zcpCoreDiag;
+  check(t8c.send.__clicks === 0, "判定一直没松口时不得发送（宁可少跑不能误发），实际点击=" + t8c.send.__clicks);
+  check(d8c.failedTurnSkip === "still-streaming",
+    "重试耗尽后应记下终局原因，实际=" + JSON.stringify(d8c.failedTurnSkip));
+  // 上游 503 这类现场无法主动复现，终局判定必须落盘，否则事后无从查证
+  const lastFail = (h8c.calls.patches || []).map((p) => p && p.lastFailedTurn).filter(Boolean).pop();
+  check(!!lastFail && lastFail.sessionId === "s-1" && lastFail.turnId === "turn-f3" &&
+        lastFail.reason === "still-streaming",
+    "终局判定必须经 patchState 落盘 lastFailedTurn，实际=" + JSON.stringify(lastFail));
+
   // ============ 场景 9：兜底的各类拒绝条件（绝不能误发） ============
   const bootFailed = async (state, opts, row) => {
     const doc = makeDocument();
@@ -707,6 +766,88 @@ async function main() {
   interrupted.feed([failedRow({ state: "completedInterrupted" })]);
   check(!interrupted.sandbox.__zcpCoreDiag.failedTurn && interruptedTree.send.__clicks === 0,
     "completedInterrupted 不得走 TurnError 兜底，实际 diag=" + JSON.stringify(interrupted.sandbox.__zcpCoreDiag.failedTurn));
+
+  // ============ 场景 10：draft（未建会话的新对话）可直接切换 + 建会话后自动带入 ============
+  const docD = makeDocument();
+  const tD = buildTree(docD);
+  const hD = boot(docD, {}, {});
+  await tickAsync(); hD.tick(); await tickAsync();
+  // 模拟「新对话」：客户端源码里未建会话的对话框 data-session-id 就是字面 draft
+  tD.frame.setAttribute("data-session-id", "draft");
+  hD.tick(); await tickAsync();
+  const tgD = docD.querySelector(TOGGLE);
+  check(!!tgD, "场景 10：开关没挂上");
+  // ① draft 态点一下 → 写 sessions.draft 占位，UI 立即翻转（不再是「发送一条消息后再切换」）
+  const p0 = hD.calls.patches.length;
+  if (tgD) tgD.click();
+  await tickAsync();
+  const patchD = hD.calls.patches[hD.calls.patches.length - 1] || {};
+  check(hD.calls.patches.length > p0 && patchD.sessionMode &&
+    patchD.sessionMode.id === "draft" && patchD.sessionMode.mode === "off",
+    "draft 切换应写 sessions.draft 占位，实际 patch=" + JSON.stringify(patchD));
+  const gD = docD.querySelector(TOGGLE);
+  check(gD && gD.getAttribute("data-state") === "off", "draft 关闭后开关应显示 off");
+  // ② 发第一条消息：事件流先认出正式 id（DOM 还没刷）→ 这一拍绝不能提升
+  hD.feed([{ kind: "userInput", sessionId: "s-9", turnId: "t9", origin: "realUser", text: "hi" }]);
+  await tickAsync();
+  const stray = hD.calls.patches.slice(p0 + 1).some((p) => p.sessionMode && p.sessionMode.id === "s-9");
+  check(!stray, "DOM 未刷出正式 id 时不得误提升");
+  // ③ DOM 刷新 → 巡检提升：写 s-9=off，并把 draft 占位清回 default
+  tD.frame.setAttribute("data-session-id", "s-9");
+  hD.tick(); await tickAsync(); hD.tick(); await tickAsync();
+  const promoted = hD.calls.patches.find((p) => p.sessionMode && p.sessionMode.id === "s-9" && p.sessionMode.mode === "off");
+  check(!!promoted, "会话建立后应把 draft 的关闭意图提升到正式会话，patches=" + JSON.stringify(hD.calls.patches.slice(p0)));
+  const cleared = hD.calls.patches.find((p) => p.sessionMode && p.sessionMode.id === "draft" && p.sessionMode.mode === "default");
+  check(!!cleared, "提升后必须清掉 draft 占位（回 default）");
+  // ④ 防误写：draft 切换后直接切去另一个「已有会话」查看（无事件流、无生成）→ 绝不能写它
+  const docE = makeDocument();
+  const tE = buildTree(docE);
+  const hE = boot(docE, {}, {});
+  await tickAsync(); hE.tick(); await tickAsync();
+  tE.frame.setAttribute("data-session-id", "draft");
+  hE.tick(); await tickAsync();
+  const tgE = docE.querySelector(TOGGLE);
+  if (tgE) tgE.click();                       // draft → off
+  await tickAsync();
+  tE.frame.setAttribute("data-session-id", "s-1");   // 切去看现有会话
+  const beforeE = hE.calls.patches.length;
+  hE.tick(); await tickAsync(); hE.tick(); await tickAsync();
+  const wrong = hE.calls.patches.slice(beforeE).some((p) => p.sessionMode && p.sessionMode.id === "s-1");
+  check(!wrong, "只是切去看现有会话时不得误写 draft 配置，patches=" + JSON.stringify(hE.calls.patches.slice(beforeE)));
+  // ⑤ 再回到这条 draft 发消息 → 之前的 draft 配置仍在，正式建会话后照样带入
+  tE.frame.setAttribute("data-session-id", "draft");
+  hE.tick(); await tickAsync();
+  tE.frame.setAttribute("data-session-id", "s-8");
+  hE.feed([{ kind: "userInput", sessionId: "s-8", turnId: "t8", origin: "realUser", text: "go" }]);
+  hE.tick(); await tickAsync(); hE.tick(); await tickAsync();
+  const promotedE = hE.calls.patches.find((p) => p.sessionMode && p.sessionMode.id === "s-8" && p.sessionMode.mode === "off");
+  check(!!promotedE, "中途切走后回到 draft 再发消息，切换意图仍应带入（s-8），patches=" + JSON.stringify(hE.calls.patches.slice(beforeE)));
+
+  // ⑥ 分屏防误伤：draft 变成正式会话时，若「停止按钮」在**另一个会话的 frame** 里
+  //    且事件流没认出该 id → 绝不能把 draft 配置写过去
+  const docF = makeDocument();
+  const tF = buildTree(docF);                 // 主 frame = s-1
+  const otherFrame = tF.mk("div", { "data-workspace-conversation-frame": "true", "data-session-id": "s-2" });
+  const otherStop = tF.mk("button", { "data-testid": "v4-stop" });
+  otherFrame.appendChild(otherStop);
+  docF.body.appendChild(otherFrame);
+  const hF = boot(docF, {}, {});
+  await tickAsync(); hF.tick(); await tickAsync();
+  tF.frame.setAttribute("data-session-id", "draft");
+  hF.tick(); await tickAsync();
+  const tgF = docF.querySelector(TOGGLE);
+  if (tgF) tgF.click();                       // draft → off
+  await tickAsync();
+  tF.frame.setAttribute("data-session-id", "s-9");   // 新会话诞生，但 s-2 正在生成
+  const beforeF = hF.calls.patches.length;
+  hF.tick(); await tickAsync(); hF.tick(); await tickAsync();
+  const crossWrite = hF.calls.patches.slice(beforeF).some((p) => p.sessionMode && p.sessionMode.id === "s-9");
+  check(!crossWrite, "分屏：别的会话在生成时不得把 draft 配置误写给新会话，patches=" + JSON.stringify(hF.calls.patches.slice(beforeF)));
+  // 生成信号回到自己 frame → 巡检应完成提升
+  tF.dock.appendChild(tF.mk("button", { "data-testid": "v4-stop" }));
+  hF.tick(); await tickAsync(); hF.tick(); await tickAsync();
+  const promotedF = hF.calls.patches.slice(beforeF).find((p) => p.sessionMode && p.sessionMode.id === "s-9" && p.sessionMode.mode === "off");
+  check(!!promotedF, "停止按钮出现在本会话 frame 内后应完成提升，patches=" + JSON.stringify(hF.calls.patches.slice(beforeF)));
 
   if (bad.length) {
     console.error("pilot mount smoke FAILED（" + bad.length + " 项）：");

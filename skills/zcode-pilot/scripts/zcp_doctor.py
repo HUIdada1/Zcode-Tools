@@ -554,6 +554,36 @@ def check_watchdog() -> None:
       * 有「DONE」→ 写完并已（尝试）重启
     """
     hr("7.5 退出后看护（写入时机）")
+
+    # 启动方式与心跳状态（0.9.3）：同步日志记录了每次拉起走的是哪条路；
+    # 「看护是否真的在跑」以心跳为准，不再只信 PID 文件（PID 会被 Windows 复用）。
+    sync_log = HERE / "_zcp_sync.log"
+    if sync_log.is_file():
+        try:
+            launches = [ln.strip() for ln in
+                        sync_log.read_text(encoding="utf-8", errors="replace").splitlines()
+                        if "已启动退出后看护" in ln]
+            if launches:
+                way = launches[-1].split("（", 1)[-1].split("）")[0]
+                print(f"{INFO} 最近一次看护拉起方式：{way}")
+                if "树内" in way:
+                    print(f"{WARN} 上次走的是「树内」降级路径 —— 计划任务点火失败"
+                          "（PowerShell/schtasks 被策略拦截？详见 _zcp_sync.log）")
+                    print("       树内看护会在客户端退出时被连坐收走，表现为「退出了但什么都没注入」")
+        except Exception:
+            pass
+    try:
+        from zcp_watchdog import PID_FILE as _pidf, live_watchdog_pid
+        live = live_watchdog_pid()
+        if live:
+            print(f"{OK} 看护正在运行（PID {live}，心跳确认）——"
+                  "客户端完全退出后会自动写入并拉起 ZCode")
+        elif _pidf.is_file():
+            print(f"{WARN} 有看护 PID 残留（PID {_pidf.read_text(encoding='utf-8').strip()})"
+                  "但心跳已停 —— 看护已死，运行 --fix 可重建")
+    except Exception:
+        pass
+
     logf = WATCHDOG_LOG
     if not logf.is_file():
         print(f"{INFO} 没有看护日志 {logf} —— 说明还没挂过看护（正常：无待办时不挂）")
@@ -851,20 +881,28 @@ def auto_fix() -> int:
         except Exception as e:
             print(f"{BAD} 修复配置失败 {cfg_path}：{e}")
 
-    # 2. 清理陈旧看护锁（0.8.1 起锁文件跨插件版本目录共享，见 zcp_sync.PID_FILE）
+    # 2. 清理陈旧看护锁（0.8.1 起锁文件跨插件版本目录共享，见 zcp_watchdog.PID_FILE）
+    #    判定升级为心跳口径（0.9.3）：PID 残留 + PID 复用会让 is_pid_alive 把无关进程
+    #    当成看护，--fix 就永远不重建看护；心跳停更 = 看护已死，PID 与心跳一起清。
+    pid_file = None
     try:
-        from zcp_watchdog import PID_FILE as pid_file
+        from zcp_watchdog import PID_FILE as pid_file, live_watchdog_pid
+        live = live_watchdog_pid()
     except Exception:
+        live = None
+    if pid_file is None:                      # zcp_watchdog 不可用：退回旧布局的锁路径
         pid_file = HERE / "_watchdog.pid"
-    if pid_file.is_file():
+    if pid_file.is_file() and not live:
         try:
             pid = int(pid_file.read_text(encoding="utf-8").strip())
-            from zcp_watchdog import is_pid_alive
-            if not is_pid_alive(pid):
-                pid_file.unlink(missing_ok=True)
-                fixed_items.append(f"清理已失效的看护锁文件 (PID {pid})")
         except Exception:
-            pid_file.unlink(missing_ok=True)
+            pid = "?"
+        pid_file.unlink(missing_ok=True)
+        try:
+            pid_file.with_name("watchdog.beat").unlink(missing_ok=True)
+        except Exception:
+            pass
+        fixed_items.append(f"清理陈旧看护锁 (PID {pid}，心跳停更；修复前 PID 复用会被误判为「看护在跑」)")
 
     # 3. 检查客户端补丁状态
     zp = _load_patcher()

@@ -105,7 +105,7 @@
   // 避免出现「浅色主题 + 深色兜底字色」这种看不清的组合。
   // 视觉规格：分段指标（图标 + 数值 + 单位）、组间发丝线、数值 tabular-nums、三态状态点、悬停明细浮层。
   const STYLE_ID = "ztps-style";
-  const STYLE_V = "zcode-pilot-ui-4";
+  const STYLE_V = "zcode-pilot-ui-5";
   function ensureStyle() {
     const prev = document.getElementById(STYLE_ID);
     if (prev && prev.getAttribute("data-ztps-style") === STYLE_V) return;
@@ -125,6 +125,7 @@
   --ztps-surface:var(--ztps-green-surface);--ztps-surface-on:var(--ztps-green-surface-2);
   --ztps-hairline:var(--ztps-green-line);--ztps-hairline-on:var(--ztps-green-line-strong);
   --ztps-line:rgba(16,185,129,.22);
+  --ztps-canvas:var(--color-background,#ffffff);
   --ztps-bg:rgba(255,255,255,.72);
   --ztps-pop:linear-gradient(155deg,rgba(255,255,255,.94) 0%,rgba(236,253,245,.88) 55%,rgba(255,255,255,.92) 100%);
   --ztps-pop-border:rgba(15,23,42,.10);
@@ -140,6 +141,7 @@
   --ztps-green-surface:rgba(52,211,153,.10);--ztps-green-surface-2:rgba(52,211,153,.16);
   --ztps-green-line:rgba(52,211,153,.20);--ztps-green-line-strong:rgba(52,211,153,.38);
   --ztps-line:rgba(52,211,153,.18);
+  --ztps-canvas:var(--color-background,#0f172a);
   --ztps-bg:rgba(8,14,12,.72);
   --ztps-pop:linear-gradient(155deg,rgba(20,30,26,.90) 0%,rgba(8,16,13,.94) 55%,rgba(12,22,18,.92) 100%);
   --ztps-pop-border:rgba(255,255,255,.10);
@@ -156,6 +158,7 @@
     --ztps-green-surface:rgba(52,211,153,.10);--ztps-green-surface-2:rgba(52,211,153,.16);
     --ztps-green-line:rgba(52,211,153,.20);--ztps-green-line-strong:rgba(52,211,153,.38);
     --ztps-line:rgba(52,211,153,.18);
+    --ztps-canvas:var(--color-background,#0f172a);
     --ztps-bg:rgba(8,14,12,.72);
     --ztps-pop:linear-gradient(155deg,rgba(20,30,26,.90) 0%,rgba(8,16,13,.94) 55%,rgba(12,22,18,.92) 100%);
     --ztps-pop-border:rgba(255,255,255,.10);
@@ -173,7 +176,9 @@
 [data-ztps-bar] .ztps-chip{
   display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;min-width:0;
   border-radius:9px;
-  background:linear-gradient(180deg,var(--ztps-green-surface-2),var(--ztps-green-surface));
+  /* 不透明主题底色垫在绿色渐变下：胶囊悬在消息滚动区上沿，半透明会被滚过的文字「透视遮挡」 */
+  background-color:var(--ztps-canvas);
+  background-image:linear-gradient(180deg,var(--ztps-green-surface-2),var(--ztps-green-surface));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.28),inset 0 0 0 1px var(--ztps-green-line),0 1px 2px rgba(16,185,129,.08);
   color:var(--ztps-green-strong);
   font-size:11px;line-height:1;letter-spacing:.01em;white-space:nowrap;
@@ -188,11 +193,11 @@
 [data-ztps-bar] .ztps-chip:active{transform:translateY(0) scale(.99)}
 [data-ztps-bar] .ztps-chip[data-active='1']{
   color:var(--ztps-green-ink);
-  background:var(--ztps-green-surface-2);
+  background-image:linear-gradient(var(--ztps-green-surface-2),var(--ztps-green-surface-2));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.34),inset 0 0 0 1px var(--ztps-green-line-strong),0 6px 18px rgba(16,185,129,.16);
 }
 [data-ztps-bar][data-state='stream'] .ztps-chip[data-kind='stats']{
-  background:linear-gradient(180deg,var(--ztps-green-surface-2),var(--ztps-green-surface));
+  background-image:linear-gradient(180deg,var(--ztps-green-surface-2),var(--ztps-green-surface));
   box-shadow:inset 0 0 0 1px var(--ztps-green-line-strong);
 }
 [data-ztps-bar] .ztps-chip-main{color:var(--ztps-green-strong);font-weight:650;letter-spacing:-.01em}
@@ -625,7 +630,7 @@
   let diag = null;
   try {
     diag = window.__zcpMeterDiag = window.__zcpMeterDiag || {};
-    diag.scriptVersion = "3.17-pilot-ui-4";
+    diag.scriptVersion = "3.17-pilot-ui-5";
     diag.loadedAt = new Date().toISOString();
   } catch (err) { /* ignore */ }
 
@@ -656,31 +661,62 @@
   // 历史：曾支持 toolbar(工具栏行内居中) / session-top(消息区 sticky) 两种落点，
   // 实测会被误认成官方控件并遮挡会话标题行，已按用户要求彻底下线。
   const MODE = "composer-below";
+  // 宿主内联样式的布局版本：样式规则升级后即使挂载位置没变，也要绕过快路径重写一次
+  //   v2（2026-11-13）：去掉 translateY —— 实测它是「滚动时被裁一半」的根因。
+  //   v3：补 margin-bottom 余量，但胶囊仍在时间线内，距窗体底 23px，用户反馈「太高」。
+  //   v4（2026-11-13 CDP 实测）：把宿主挂到滚动容器 v4-timeline 之外，才能真正贴底。
+  const LAYOUT_V = "ztps-layout-4";
   function attach(host) {
-    // 快路径：宿主已正确挂在卡片之后 → 无需重新查找 composer，0 开销返回
-    if (host.getAttribute("data-ztps-mode") === MODE && host.isConnected &&
-        host._target && host._target.isConnected && host.previousElementSibling === host._target) {
-      return true;
-    }
     const card = findComposerCard();
     if (!card || !card.parentElement || isInsideSidePane(card)) return false;
-    if (host.getAttribute("data-ztps-mode") !== MODE || host.parentElement !== card.parentElement ||
-        host.previousElementSibling !== card) {
-      card.insertAdjacentElement("afterend", host);
+    // ★ 贴底关键：v4-timeline 是 overflow-y:auto 的滚动容器，胶囊挂在它**里面**时永远被
+    //   裁在它的底边 —— 而那条底边距窗体底还隔着父容器 pb-4 的 16px + 窗体自身 7px，
+    //   所以怎么调 margin 都「悬空/太高」。把宿主挂到时间线**之外**（作它的 flex 兄弟），
+    //   再用「负 margin-bottom = 父容器底部 padding」把它拉进 padding 区，胶囊才真正贴到
+    //   窗体底（CDP 实测距底 7px）；时间线 flex-1 自动让位，无裁切、不压输入卡片。
+    //   找不到时间线（空态/设置页等）时退回「卡片之后」的旧落点，保证不丢胶囊。
+    let tl = null;
+    try { tl = card.closest('[data-testid="v4-timeline"]'); } catch (err) { /* ignore */ }
+    const outside = !!(tl && tl.parentElement);
+    const anchor = outside ? tl : card;
+    const styled = host.getAttribute("data-ztps-layout") === LAYOUT_V;
+    const inPlace = host.getAttribute("data-ztps-mode") === MODE && host.isConnected &&
+        host._target === anchor && host.previousElementSibling === anchor;
+    // 快路径：位置与样式都对 → 同步宽度与负 margin。
+    // ★ 负 margin 必须每拍重算：初次挂载常发生在加载期，父容器 pb-4 还没生效（padB=0），
+    //   若只在首次写死，margin 会永远停在 0、胶囊悬空 23px。窗口缩放/主题切换同理。
+    if (styled && inPlace) {
+      if (outside) {
+        host.style.width = Math.round(card.getBoundingClientRect().width) + "px";
+        const padB = parseFloat(getComputedStyle(anchor.parentElement).paddingBottom) || 0;
+        host.style.marginBottom = (-padB) + "px";
+      }
+      return true;
+    }
+    if (!inPlace) {
+      anchor.insertAdjacentElement("afterend", host);
       host.setAttribute("data-ztps-mode", MODE);
-      host.style.cssText = "";
+    }
+    host.style.cssText = "";
+    if (outside) {
+      const padB = parseFloat(getComputedStyle(anchor.parentElement).paddingBottom) || 0;
       Object.assign(host.style, {
-        display: "flex", justifyContent: "center",
-        alignItems: "center",
-        marginTop: "3px", padding: "0",
-        // 视觉下移：composer 容器底部还有一段内边距，状态条看起来「悬空」离窗口底太远。
-        // 用 transform 而非 margin —— 不参与父容器高度计算，不会把输入框整体顶上去。
-        transform: "translateY(6px)",
-        alignSelf: "stretch",          // 与 composer 卡片同宽
-        pointerEvents: "auto",
+        display: "flex", justifyContent: "center", alignItems: "center",
+        width: Math.round(card.getBoundingClientRect().width) + "px",
+        alignSelf: "center", flex: "0 0 auto",
+        marginTop: "3px", marginBottom: (-padB) + "px", padding: "0",
+        position: "relative", zIndex: "5", pointerEvents: "auto",
+      });
+    } else {
+      Object.assign(host.style, {
+        display: "flex", justifyContent: "center", alignItems: "center",
+        marginTop: "3px", marginBottom: "0px", padding: "0",
+        position: "relative", zIndex: "5",
+        alignSelf: "stretch", pointerEvents: "auto",
       });
     }
-    host._target = card;
+    host.setAttribute("data-ztps-layout", LAYOUT_V);
+    host._target = anchor;
     host.querySelectorAll("[data-ztps-chip]").forEach((chip) => {
       chip.style.pointerEvents = "auto";
     });

@@ -46,7 +46,7 @@
   const MARK = "data-zpilot";
   const dec = new TextDecoder();   // 事件流帧解码（与 zcode-tps.js 同法）
   const diag = (window.__zcpCoreDiag = window.__zcpCoreDiag || {});
-  diag.scriptVersion = "1.0";
+  diag.scriptVersion = "1.1";   // 1.1：失败轮暂时性拒绝改为延迟重判 + 终局判定落盘 lastFailedTurn
   diag.loadedAt = new Date().toISOString();
 
   // ============================ 常量（契约 §2.2 / §2.3.4 / §3 / §4） ============================
@@ -60,6 +60,13 @@
   const LS_JOURNAL = "zpilot-journal";     // 桥不持久化 journal 时的本地镜像（降级）
   const LS_ERROR_STREAK = "zpilot-error-streak";  // 失败轮次续跑计数（按会话，抗刷新）
   const ERROR_SEND_MAX = 2;          // 单个失败轮次最多发送尝试次数（首次 + 重试 1 次）
+  // 失败轮的「暂时性拒绝」：这些原因会在几十~几百毫秒内自己消失，必须延迟重判，
+  // 不能当成终局 —— 官方 stop 按钮的卸载要等 React 下一帧，比 turnHeader(failed)
+  // 晚到（实测 2026-11-13 17:10:19 上游 503 重试耗尽：failed 事件与 DOM 卸载同一轮，
+  // 一次性判定必然读到 still-streaming，于是那一轮被永久放弃、不补发「继续」）。
+  const TRANSIENT_FAIL_REASONS = { "still-streaming": 1, "no-session": 1, "not-current-session": 1 };
+  // 重试节奏：累计约 6.3s，覆盖「官方重试耗尽 → DOM 卸载 → 会话 DOM 刷新」的最长滞后
+  const FAILED_TURN_RETRY_DELAYS = [400, 900, 1800, 3200];
 
   // 契约 §4 文案表（**逐字复制，禁止改写标点**）。
   // 正常续跑由 hook 使用这 9 条；渲染层只在崩溃恢复时用到，默认 #6「继续」。
@@ -204,17 +211,24 @@
     return m === "off" ? "off" : m === "loop" ? "loop" : "on";
   };
 
-  function sessionId() {
-    // ★ 以 DOM 当前会话为准：切换到已有对话时不一定有新事件，事件流的
-    //   currentSessionId 可能仍是上一个会话；按会话开关必须跟着用户眼前的对话走。
-    const fromDom = safe(() => {
-      // 分屏时可能有多个 conversation-frame：优先取当前可见 composer 所属的那个。
+  function currentFrame() {
+    // 分屏时可能有多个 conversation-frame：优先取当前可见 composer（模式切换所在）的那个。
+    return safe(() => {
       let f = null;
       const trigger = findChatModeTrigger().el;
       if (trigger && typeof trigger.closest === "function") {
         f = trigger.closest("[data-workspace-conversation-frame]");
       }
       if (!f) f = document.querySelector("[data-workspace-conversation-frame]");
+      return f || null;
+    }, null);
+  }
+
+  function sessionId() {
+    // ★ 以 DOM 当前会话为准：切换到已有对话时不一定有新事件，事件流的
+    //   currentSessionId 可能仍是上一个会话；按会话开关必须跟着用户眼前的对话走。
+    const fromDom = safe(() => {
+      const f = currentFrame();
       if (!f) return null;
       let sid = f.getAttribute("data-session-id");
       if (!sid) {
@@ -473,6 +487,9 @@
       markTurnStart(sid, turnId);
       // 只有真人输入才清零失败连发计数；自动兜底发出去的「继续」是 synthetic，不能自我刷新。
       if (row.origin === "realUser") resetErrorStreak(sid || currentSessionId);
+      // 用户发消息（可能正是 draft 的第一条）→ 快路径尝试提升 draft 切换意图；
+      // DOM 此时可能还没刷出正式 id，提升不成功也没关系，1.5s 巡检还会再试。
+      if (lastViewSid === "draft") promoteDraftIntent();
     } else if (row.kind === "reasoning" || row.kind === "assistantText") {
       touchActivity();
     }
@@ -577,11 +594,6 @@
 [data-zpilot-toggle][data-state='loop'][data-runtime='1'] .zp-track{background:var(--zp-loop)}
 [data-zpilot-toggle][data-runtime='1'] .zp-knob{transform:translateX(10px)}
 [data-zpilot-toggle] .zp-t{color:inherit}
-[data-zpilot-toggle] .zp-v{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
-[data-zpilot-toggle][data-state='on'] .zp-v{color:var(--zp-on)}
-[data-zpilot-toggle][data-state='paused'] .zp-v{color:var(--zp-paused)}
-[data-zpilot-toggle][data-state='loop'] .zp-v{color:var(--zp-loop)}
-[data-zpilot-toggle][data-state='off'] .zp-v{color:var(--zp-off)}
 [data-zpilot-toggle][data-busy='1']{opacity:.6;pointer-events:none}
 /* ============ 提示条（只读；不拦截点击） ============ */
 [data-zpilot-toast]{
@@ -626,6 +638,13 @@
   // trigger 右侧——旧实现把「已经在行尾」当成了终态，漂移纠正条件又要求两者同父且严格相邻，
   // 结果一次降级就永久停在工具栏末尾（实测 diag.toggleWhere 一直是 toolbar-end）。
   let toggleEl = null;
+  // draft（还没建立会话的新对话，DOM data-session-id 字面值 "draft"）切换意图暂存：
+  // 未建会话也允许切换，先写 sessions["draft"]；首条消息建会话后由 promoteDraftIntent 提升。
+  let lastViewSid = null;        // 上一次巡检时眼前的会话（用于识别 draft → 正式 的转变）
+  let draftFrameEl = null;       // 切换发生时所在的 draft 对话框 DOM 节点（身份校验）
+  let draftPromote = null;       // { sid, until } —— 提升重试窗口
+  let draftPromoteBusy = false;  // 提升写盘进行中标记，防跨轮重入
+  const DRAFT_PROMOTE_WINDOW_MS = 10000;
 
   function findChatModeTrigger() {
     const tried = [];
@@ -676,12 +695,9 @@
     const t = document.createElement("span");
     t.className = "zp-t";
     t.textContent = "自动继续";
-    const v = document.createElement("span");
-    v.className = "zp-v";
+    // 状态文字（开/关/暂停/循环）按用户要求不显示：轨道配色 + 悬停 title + aria-label 已足够表达
     el.appendChild(track);
     el.appendChild(t);
-    el.appendChild(v);
-    el._zpv = v;
 
     // 阻止事件冒泡到官方工具栏（避免误触发 Radix 菜单/发送等）
     for (const evt of ["pointerdown", "mousedown", "pointerup", "mouseup", "contextmenu"]) {
@@ -705,13 +721,17 @@
   async function onToggleClick() {
     if (!stateReady || bridgeMissing) return;
     const sid = sessionId();
-    if (!sid || sid === "draft") {
-      toast("自动继续：当前对话还没有建立会话，发送一条消息后再切换");
+    if (!sid) {
+      // 连会话框都没定位到（页面还没渲染出来）——这种不是「新对话」，不能凭空置意图
+      toast("自动继续：还没定位到对话窗口，请在对话输入框所在界面重试");
       return;
     }
     if (st.enabled !== true) { toast("自动继续：已在插件配置中关闭，请先到插件配置里开启"); return; }
     if (st.paused === true) { toast("自动继续：当前全局暂停中，请先到插件配置里恢复"); return; }
 
+    // draft = 还没建立会话的新对话：照常切换，先落在 sessions["draft"] 暂存位上
+    const draft = sid === "draft";
+    if (draft) { lastViewSid = "draft"; draftFrameEl = currentFrame(); }
     const before = rawModeOf(sid);
     const next = effectiveMode(sid) === "off" ? "default" : "off";
     // 乐观更新：只改当前会话的 mode，其他会话不受影响。
@@ -723,6 +743,10 @@
       sessions[sid] = Object.assign({}, sessions[sid] || {}, { mode: before });
       diag.toggleError = "写入失败已回滚";
       toast("自动继续：当前会话开关写入失败，已回滚");
+    } else if (draft) {
+      toast(next === "off"
+        ? "自动继续：新对话已关（发送第一条消息后生效）"
+        : "自动继续：新对话已开（发送第一条消息后生效）");
     } else {
       diag.toggleWrite = { sessionId: sid, mode: next, at: Date.now() };
       toast(next === "off"
@@ -733,21 +757,84 @@
     renderAll();
   }
 
+  // ============================ draft 切换意图的提升 ============================
+  // 新对话未建会话时的切换暂存在 sessions["draft"]。发送第一条消息后内核建立会话，
+  // 对话框 data-session-id 从 "draft" 变为正式 id —— 此刻把暂存配置提升到该会话并清掉暂存。
+  // 判错比漏判伤害大（漏判只是没带走，用户在正式会话里再切一次即可；误写会污染别人），
+  // 所以提升必须同时满足：
+  //   ① 正式 id 出现的瞬间，会话框还是当初切换时那个 draft DOM 节点（React 建会话
+  //      只刷属性不重挂；切去看别的对话多半是另一个节点）；
+  //   ② 有「该会话确实刚起步」的证据 —— 事件流认出了该 id（发消息即有行），或停止按钮
+  //      出现在**该会话自己的 frame** 里（分屏时别处生成不算，全局 isStreaming 会误判）。
+  // 证据可能比 DOM 晚到（事件流抖动/乱序），所以 ① 成立后开一个 10s 重试窗口；窗口内
+  // 拿不到证据、或用户又切走，则作废（并把占位清回 default，避免泄漏给以后的会话）。
+  async function promoteDraftIntent() {
+    if (bridgeMissing || draftPromoteBusy) return;
+    const sid = sessionId();
+    if (sid === "draft") { lastViewSid = sid; return; }
+    if (!sid) return;
+    if (lastViewSid === "draft") {
+      lastViewSid = sid;
+      draftPromote = (draftFrameEl && currentFrame() === draftFrameEl)
+        ? { sid, until: Date.now() + DRAFT_PROMOTE_WINDOW_MS }
+        : null;
+    } else if (draftPromote && draftPromote.sid !== sid) {
+      draftPromote = null;                  // 用户又切到别的对话 → 本轮提升作废
+    }
+    if (!draftPromote) return;
+    const rec = sessions["draft"];
+    const mode = rec && typeof rec.mode === "string" ? rec.mode : null;
+    if (!mode || mode === "default") { draftPromote = null; return; }
+    if (Date.now() >= draftPromote.until) {
+      draftPromote = null;
+      await patchState({ sessionMode: { id: "draft", mode: "default" } });
+      return;
+    }
+    const genuine = currentSessionId === sid || safe(() => {
+      const stops = Array.from(document.querySelectorAll("[data-testid='v4-stop']"));
+      return stops.some((b) => {
+        const f = typeof b.closest === "function" ? b.closest("[data-workspace-conversation-frame]") : null;
+        return !!f && f.getAttribute("data-session-id") === sid;
+      });
+    }, false);
+    if (!genuine) return;                   // 窗口内下一拍再试
+    draftPromoteBusy = true;
+    const back = await patchState({ sessionMode: { id: sid, mode: mode } });
+    if (back) {
+      await patchState({ sessionMode: { id: "draft", mode: "default" } });
+      diag.draftPromoted = { sessionId: sid, mode: mode, at: Date.now() };
+      toast(mode === "off"
+        ? "自动继续：新对话按 draft 设置保持关闭"
+        : "自动继续：draft 设置已带入新会话");
+    } else {
+      diag.toggleError = "draft 切换意图写入失败";
+      toast("自动继续：新对话的开关设置未生效，可在会话里再切一次");
+    }
+    draftPromote = null;
+    draftFrameEl = null;
+    draftPromoteBusy = false;
+    renderAll();
+  }
+
   function toggleTitle() {
     const sid = sessionId();
     const mode = effectiveMode(sid);
     const n = consecutiveOf(sid);
     const cnt = n != null ? `\n本会话连续触发：${n}/${settings.maxConsecutive}` : "";
+    const who = sid === "draft" ? "新对话" : "当前会话";
     const base = st.enabled !== true
       ? "自动继续：已在插件配置中关闭"
       : st.paused === true
         ? "自动继续：全局暂停中，暂停需在插件配置里恢复"
         : mode === "off"
-          ? "自动继续：当前会话已关闭（点击开启）"
+          ? `自动继续：${who}已关闭（点击开启）`
           : mode === "loop"
-            ? "自动继续：当前会话为自主循环（点击关闭）"
-            : "自动继续：当前会话已开启（点击关闭）";
-    return base + cnt + "\n只影响当前会话；其他对话各自独立。\n续跑由官方 Stop hook 执行。";
+            ? `自动继续：${who}为自主循环（点击关闭）`
+            : `自动继续：${who}已开启（点击关闭）`;
+    const scope = sid === "draft"
+      ? "\n新对话还没建立会话；切换后在发送第一条消息时自动带入。"
+      : "\n只影响当前会话；其他对话各自独立。";
+    return base + cnt + scope + "\n续跑由官方 Stop hook 执行。";
   }
 
   function renderToggle() {
@@ -757,8 +844,7 @@
     // 轨道只反映「当前会话自身的开关」；暂停/总开关关闭由 data-state 表达。
     const on = rawModeOf(sessionId()) !== "off" ? "1" : "0";
     if (toggleEl.getAttribute("data-runtime") !== on) toggleEl.setAttribute("data-runtime", on);
-    const txt = stateLabel();
-    if (toggleEl._zpv && toggleEl._zpv.textContent !== txt) toggleEl._zpv.textContent = txt;
+    const txt = stateLabel();          // 只进 aria-label / diag，不再渲染成文字
     const title = toggleTitle();
     if (toggleEl.title !== title) toggleEl.title = title;
     safe(() => toggleEl.setAttribute("aria-checked", on === "1" ? "true" : "false"));
@@ -1727,25 +1813,45 @@
     return "";
   }
 
-  function handleFailedTurn(sid, row) {
+  function handleFailedTurn(sid, row, attempt) {
     if (!row || !sid) return;
     const turnId = String(row.turnId || row.productTurnId || row.rowId || "");
     if (!turnId) return;
+    const tries = attempt || 0;
     // 同一轮会被 upsert 多次（running → failed），只处理第一次 failed。
+    // failedTurnHandled 的语义是「本轮已定案」：要么已排期续跑，要么已确认不再接力；
+    // 暂时性拒绝不算定案 —— 定案了就等于把这一轮永久放弃。
     if (failedTurnHandled[sid] === turnId) return;
-    failedTurnHandled[sid] = turnId;
+
+    // 判定窗口里用户可能自己发了新消息 → 绝不盖掉真人输入，直接定案放弃
+    if (lastTurnBySid[sid] && lastTurnBySid[sid] !== turnId) {
+      failedTurnHandled[sid] = turnId;
+      diag.failedTurnSkip = "new-turn-took-over";
+      return;
+    }
 
     const reason = canResumeFailedTurn(sid, row);
-    diag.failedTurn = {
-      sid, turnId, at: Date.now(),
-      reason: reason || "scheduled",
-    };
-    if (reason) return;
-
-    const text = String(settings.continueTextInterrupted || RECOVER_TEXT);
-    diag.errorResumeScheduled = { sid, turnId, graceMs: settings.graceMs };
-    setTaskTimer(() => attemptResumeFailedTurn(sid, turnId, text),
-      Math.max(0, Number(settings.graceMs) || 0));
+    diag.failedTurn = { sid, turnId, at: Date.now(), tries, reason: reason || "scheduled" };
+    if (!reason) {
+      failedTurnHandled[sid] = turnId;
+      const text = String(settings.continueTextInterrupted || RECOVER_TEXT);
+      diag.errorResumeScheduled = { sid, turnId, graceMs: settings.graceMs };
+      setTaskTimer(() => attemptResumeFailedTurn(sid, turnId, text),
+        Math.max(0, Number(settings.graceMs) || 0));
+      return;
+    }
+    if (TRANSIENT_FAIL_REASONS[reason] && tries < FAILED_TURN_RETRY_DELAYS.length) {
+      diag.failedTurnRetry = { sid, turnId, reason, tries: tries + 1 };
+      setTaskTimer(() => handleFailedTurn(sid, row, tries + 1), FAILED_TURN_RETRY_DELAYS[tries]);
+      return;
+    }
+    // 终局：不该接力（或重试窗口内判定一直没松开）。把判定落盘一条 ——
+    // 上游 503 这种现场没法主动复现，事后只能靠 state.json 还原当时卡在哪一步。
+    failedTurnHandled[sid] = turnId;
+    diag.failedTurnSkip = reason;
+    void patchState({
+      lastFailedTurn: { sessionId: sid, turnId, reason, tries, at: Date.now() },
+    });
   }
 
   function attemptResumeFailedTurn(sid, turnId, text) {
@@ -1971,6 +2077,8 @@
         }
       }
       refreshState(false);
+      // draft 切换意图提升巡检：识别「眼前这条 draft 刚变成正式会话」并带走暂存配置
+      promoteDraftIntent();
     }, POLL_MS);
     // 契约 §2.2：visibilitychange 时立即拉取
     document.addEventListener("visibilitychange", () => {

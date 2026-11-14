@@ -1,7 +1,7 @@
 # zcode-pilot · ZCode 客户端一站式原生增强套件
 
 <p align="left">
-  <a href="https://github.com/HUIdada1/Zcode-Tools/releases"><img src="https://img.shields.io/badge/version-0.9.2-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/HUIdada1/Zcode-Tools/releases"><img src="https://img.shields.io/badge/version-0.9.3-blue.svg?style=flat-square" alt="Version"></a>
   <img src="https://img.shields.io/badge/python-3.10+-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/dependencies-0%20(std%20only)-success.svg?style=flat-square" alt="Dependencies">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg?style=flat-square" alt="Platform">
@@ -118,6 +118,27 @@ python -c "import pathlib,subprocess,sys; h=pathlib.Path.home(); p=next(iter([*h
 python3 -c "import pathlib,subprocess,sys; h=pathlib.Path.home(); p=next(iter([*h.glob('.zcode/**/zcp_doctor.py'),*h.glob('.zcode/**/doctor.py')]),None); subprocess.run([sys.executable,str(p),'--fix']) if p else print('未找到已安装的 ZCode 插件，请先在客户端内安装')"
 ```
 
+### 方案 C：换台电脑 / 更新插件后「完全退出也没注入」专查（0.9.3）
+
+先弄清楚注入链路的时序 —— 看护是**在会话启动那一刻**挂上的：
+
+```
+开新会话（发条消息） → 钩子跑同步 → 挂起「退出后看护」
+→ 完全退出 ZCode（托盘右键 → 退出） → 看护写入补丁 → 自动拉起 ZCode
+```
+
+所以**市场「更新」只换插件目录，那次退出的值岗的还是旧看护**（0.9.2 之前它会被
+客户端退出连坐杀掉）。正确姿势：**更新后先开个新会话发条消息，再完全退出**，
+让新版插件的看护上岗。
+
+0.9.3 起看护启动带「点火 → 活性确认 → 兜底」三段链路与心跳单例，历史上两类
+「退了也不注入」的哑故障已修复：① 计划任务点了火但 pythonw 被杀软拦掉（无人值岗）；
+② 旧看护的 PID 残留被 Windows 复用给无关进程，导致新看护永远不再启动。
+若仍不生效，按 方案 B 跑 `--fix`，输出里重点看两行：
+- **「最近一次看护拉起方式」**：`计划任务·树外` 正常；`Popen·树内` = PowerShell 与
+  schtasks 都被策略拦截（树内看护会被退出连坐收走），需放开限制；
+- **「看护正在运行（PID …，心跳确认）」**：看到这行后再退出才会写入；没有就先跑 `--fix`。
+
 ---
 
 ## 🎯 常用特性使用技巧
@@ -202,6 +223,16 @@ zcp-run.cmd                        # Windows
 
 <details>
 <summary><b>📜 历史版本审计与故障排查记录</b></summary>
+
+#### 0.9.3（改进：新对话未发消息也能直接切「自动继续」，发出首条后自动带入正式会话；看护启动加活性确认与心跳单例）
+- **看护启动两段式 + 三级兜底（换电脑「退了也不注入」修复）**：0.9.2 的计划任务路径只确认了「PowerShell 命令链执行完」（`TASK_OK`），不确认看护进程真的活着 —— pythonw 被杀软拦截 / Store Python 别名损坏 / 组策略静默拒绝 Start 时全部无声失败，表现为「TASK_OK 打了但退出后照样什么都没注入」。现在拆成「点火（PowerShell → **schtasks.exe** 兜底，绕开 PowerShell 依赖/受限语言模式）→ `wait_watchdog_alive` 等心跳现身才算成功 → 都不行才降级 Popen·树内并留痕」，Popen 降级路径同样做活性确认；
+- **心跳账本 `~/.zcode/pilot/watchdog.beat`（单例判定唯一事实源）**：旧方案只看 PID 文件 + `is_pid_alive`，被连坐绞杀/崩溃的看护来不及清 PID 文件，Windows 又按顺序复用 PID —— 死号被无关进程顶上后，同步端永远误判「已有看护在跑」、从此不再拉起（换台电脑「完全退出也不重注入」的头号嫌疑）。现在判定 = 心跳新鲜（≤120s）且心跳里的 PID 存活；看护自身单例与等待期双看护竞态也改由心跳裁决（发现更新的活实例 → 让位退出）；
+- **钩子 Python 发现链加宽**：`python → python3 → py -3`（Windows 官方安装器默认装 py launcher 但不一定进 PATH，旧链路在这类机器上钩子静默失败）；
+- **`zcp_doctor.py` 增强**：新增「最近一次看护拉起方式」「看护是否在跑（心跳确认）/PID 残留但心跳停」两段诊断；`--fix` 清陈旧锁改心跳口径（不再被 PID 复用骗过）。
+- **背景**：开关是「按会话独立」的，而新对话在发出第一条消息前还没有会话 id（客户端 DOM 里 `data-session-id` 是字面值 `draft`，3.18.2 asar 实测确认），旧版因此直接拒切并提示「当前对话还没有建立会话，发送一条消息后再切换」—— 但用户此刻想操作的对象恰恰就是这个即将到来的新对话；
+- **改进**：draft 态照常切换，意图先暂存到保留桶 `sessions["draft"]`（契约 §2.2 新增说明）；首条消息发出、正式会话 id 出现后，渲染层把它**提升**为该会话的 `mode` 并清掉占位。提升有双重防误写：正式 id 出现瞬间会话框必须还是当初切换时那个 draft DOM 节点（挡住「切去看别的对话」），且要有「该会话确实刚起步」的证据 —— 事件流认出该 id 或停止按钮出现在**它自己的 frame** 里（分屏时别处生成不算）；证据晚到给 10s 重试窗口，窗口内拿不到证据或用户切走即作废并清占位，不会泄漏给以后的会话；
+- **界面精简**：输入框开关右侧的状态文字（开/关/暂停/循环）按用户要求移除，只留「自动继续」+ 轨道配色 —— 状态语义由轨道颜色、悬停 title 与 `aria-label` 继续承载，读屏与排障信息不丢；
+- **新增回归断言**（冒烟测试场景 10，六项）：draft 切换写占位且不弹「先发消息」、DOM 未刷新时不得抢跑提升、建会话后提升到正式会话并把 draft 清回 default、切去看现有会话绝不误写、中途切走再回来仍能带入、分屏他处生成不误触发；Python 全量回归 507 项通过。
 
 #### 0.9.2（修复：Windows 看护被客户端退出「连坐」绞杀，重注入永远不落地）
 - **根因**：看护由 SessionStart 钩子直接 `Popen` 拉起，是 `ZCode.exe → zcode-runtime-host.exe → shell → python` 的**后代进程**；托盘「退出」时客户端会把整棵后代进程树一起收掉。`DETACHED_PROCESS` 只脱控制台、**不脱进程树**，于是看护在观测到「ZCode 已退出」的前一秒就被绞杀 —— 日志里只有「启动待命」一行、连失败记录都没有，用户看到的现象是「按提示完全退出了，但什么都没注入」，且**无论重退多少次都复现**（每一代新看护仍挂在树上）。2026-11-12/13 实测两代看护（PID 22448 / 20500）均无声消失；历史 5 次成功写入全是「等待 0s」场景（看护启动时客户端本来就没在跑，恰好绕开连坐），所以该缺陷一直没在日志里露头；
